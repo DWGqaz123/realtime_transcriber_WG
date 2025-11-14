@@ -1,0 +1,11 @@
+{
+  "label": "01_test.wav_chunk200",
+  "wav_file": "/Users/dwg/CODE/AI_Projects/realtime_transcriber_WG/audio_test_record/01_test.wav",
+  "chunk_ms": 200,
+  "audio_duration_sec": 29.5915625,
+  "num_chunks": 148,
+  "num_partial_events": 28,
+  "num_committed_events": 1,
+  "first_partial_latency_sec": 2.011079042000347,
+  "first_committed_latency_sec": 30.517215083993506
+}

@@ -1,0 +1,11 @@
+{"message_type": "session_started", "session_id": "585c59c79b4042099c83f8cc38c092b5", "config": {"sample_rate": 16000, "audio_format": "pcm_16000", "language_code": null, "timestamps_granularity": "word", "vad_commit_strategy": false, "vad_silence_threshold_secs": 1.5, "vad_threshold": 0.4, "min_speech_duration_ms": 100, "min_silence_duration_ms": 100, "max_tokens_to_recompute": 5, "model_id": "scribe_v2_realtime", "disable_logging": false, "include_timestamps": false, "include_language_detection": false}}
+{"message_type": "partial_transcript", "text": "Hello everyone"}
+{"message_type": "partial_transcript", "text": "Hello everyone, I am"}
+{"message_type": "partial_transcript", "text": "Hello everyone, I am Winston"}
+{"message_type": "partial_transcript", "text": "Hello everyone, I am Winston. So nice to"}
+{"message_type": "partial_transcript", "text": "Hello everyone, I am Winston. So nice to meet you guys."}
+{"message_type": "partial_transcript", "text": "Hello everyone I am Winston so nice to meet you guys I am."}
+{"message_type": "partial_transcript", "text": "Hello everyone I am Winston so nice to meet you guys I am student in"}
+{"message_type": "partial_transcript", "text": "Hello everyone I am Winston. So nice to meet you guys. I am student in Kanegi Mail."}
+{"message_type": "partial_transcript", "text": "Hello everyone I am Winston. So nice to meet you guys. I am a student in Kanagawa University."}
+{"message_type": "committed_transcript", "text": "Hello everyone I am Winston. So nice to meet you guys. I am a student in Kanagawa University."}

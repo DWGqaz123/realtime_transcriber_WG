@@ -1,0 +1,10 @@
+{
+  "mode": "manual",
+  "chunk_ms": 200,
+  "audio_duration_sec": 29.5915625,
+  "num_committed_events": 2,
+  "commit_times_sec": [
+    15.117512958997395,
+    30.495255041998462
+  ]
+}

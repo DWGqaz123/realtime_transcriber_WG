@@ -1,0 +1,21 @@
+{
+  "label": "02_test.wav_commit20.0s",
+  "mode": "manual",
+  "audio_file": "/Users/dwg/CODE/AI_Projects/realtime_transcriber_WG/audio_test_record/02_test.wav",
+  "chunk_ms": 200,
+  "audio_duration_sec": 29.5915625,
+  "commit_interval_target_sec": 20.0,
+  "num_committed_events": 2,
+  "num_commits_sent": 2,
+  "commit_audio_times_sec": [
+    20.0,
+    29.6
+  ],
+  "segment_lengths_sec": [
+    20.0,
+    9.600000000000001
+  ],
+  "avg_segment_sec": 14.8,
+  "min_segment_sec": 9.600000000000001,
+  "max_segment_sec": 20.0
+}
