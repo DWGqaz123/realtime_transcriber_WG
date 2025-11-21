@@ -3,6 +3,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from session_manager import SessionManager
 from run_logger import RunLogger
 from pathlib import Path
+import os
+from dotenv import load_dotenv
+
+# Load .env from project root (one level up from backend/)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+ENV_PATH = ROOT_DIR / ".env"
+load_dotenv(ENV_PATH)  # This will load ELEVENLABS_API_KEY into environment
 
 app = FastAPI()
 
@@ -11,7 +18,9 @@ app = FastAPI()
 # but for now a simple global instance is enough.
 base_runs_dir = Path("runs")
 run_logger = RunLogger(base_dir=base_runs_dir)
-session_manager = SessionManager(run_logger=run_logger)
+eleven_api_key = os.getenv("ELEVENLABS_API_KEY", "")
+session_manager = SessionManager(run_logger=run_logger, api_key=eleven_api_key)
+
 
 
 def get_session_manager() -> SessionManager:
