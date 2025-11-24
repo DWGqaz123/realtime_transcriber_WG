@@ -32,6 +32,7 @@ final class TranscribeViewModel: ObservableObject {
     @Published var mode: RecordingMode = .lecture
     @Published var permissionStatus: String = "Unknown"
     @Published var showPermissionAlert: Bool = false
+    @Published var currentProjectId: Int?
     
     // 音频电平相关
     @Published var audioLevel: Float = 0.0

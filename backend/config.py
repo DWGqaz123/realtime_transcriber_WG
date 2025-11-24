@@ -61,8 +61,8 @@ class TranscriptionConfig:
         # VAD settings
         vad_silence_threshold_secs=1.5,  # Commit after 1.5s silence
         vad_threshold=0.4,               # Voice activity threshold
-        min_speech_duration_ms=1000,     # Minimum speech duration (1s)
-        min_silence_duration_ms=1000,    # Minimum silence duration (1s)
+        min_speech_duration_ms=300,     # Minimum speech duration 
+        min_silence_duration_ms=300,    # Minimum silence duration 
     )
     
     @classmethod

@@ -2,15 +2,80 @@
 //  ContentView.swift
 //  RealtimeTranscriberMac
 //
-//  Created by 董文光 on 2025/11/14.
+//  Main content view with project sidebar
 //
+
 import SwiftUI
+
 
 struct ContentView: View {
     @StateObject private var viewModel = TranscribeViewModel()
+    @StateObject private var projectViewModel = ProjectListViewModel()
+
+    var body: some View {
+        NavigationSplitView {
+            // 侧边栏：项目列表
+            ProjectSidebarView(viewModel: projectViewModel)
+        } detail: {
+            // 主内容区：录音界面
+            RecordingView(
+                viewModel: viewModel,
+                projectViewModel: projectViewModel
+            )
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+}
+
+// MARK: - Recording View (原有的录音界面)
+
+struct RecordingView: View {
+    @ObservedObject var viewModel: TranscribeViewModel
+    @ObservedObject var projectViewModel: ProjectListViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            
+            // Project info bar
+            if let project = projectViewModel.selectedProject {
+                HStack {
+                    Image(systemName: "folder.fill")
+                        .foregroundColor(.blue)
+                    
+                    Text(project.name)
+                        .font(.headline)
+                    
+                    if !project.description.isNilOrEmpty {
+                        Text("•")
+                            .foregroundColor(.secondary)
+                        Text(project.description!)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    
+                    Spacer()
+                    
+                    Text("\(project.sessionCount) sessions")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(8)
+            } else {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text("Please select or create a project to start recording")
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(8)
+            }
 
             // Mode selector and status bar
             HStack {
@@ -38,6 +103,10 @@ struct ContentView: View {
                     if viewModel.isRecording {
                         viewModel.stopRecording()
                     } else {
+                        // 检查是否选择了项目
+                        guard projectViewModel.selectedProject != nil else {
+                            return
+                        }
                         viewModel.startRecording()
                     }
                 }) {
@@ -50,6 +119,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(viewModel.isRecording ? .red : .blue)
+                .disabled(projectViewModel.selectedProject == nil && !viewModel.isRecording)
 
                 // 录音状态指示器
                 if viewModel.isRecording {
@@ -69,8 +139,13 @@ struct ContentView: View {
                             .foregroundColor(.secondary)
                     }
                 } else {
-                    Text("Ready to record")
-                        .foregroundColor(.secondary)
+                    if projectViewModel.selectedProject != nil {
+                        Text("Ready to record")
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Select a project to begin")
+                            .foregroundColor(.orange)
+                    }
                 }
 
                 Spacer()
@@ -86,16 +161,8 @@ struct ContentView: View {
                         
                         Spacer()
                         
-                        // 静音状态指示
-                        if viewModel.isSilent {
-                            HStack(spacing: 4) {
-                                Image(systemName: "speaker.slash.fill")
-                                    .foregroundColor(.gray)
-                                Text("Silent (not sending)")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            }
-                        } else if viewModel.isDetectingSound {
+                        // 音量状态指示
+                        if viewModel.isDetectingSound {
                             HStack(spacing: 4) {
                                 Image(systemName: "waveform")
                                     .foregroundColor(.green)
@@ -135,28 +202,14 @@ struct ContentView: View {
                                         endPoint: .trailing
                                     )
                                 )
-                                .frame(
-                                    width: geometry.size.width * CGFloat(min(sqrt(viewModel.audioLevel * 10.0), 1.0)),
-            
-                                    height: 24
-                                )
+                                .frame(width: geometry.size.width * CGFloat(min(sqrt(viewModel.audioLevel * 10.0), 1.0)), height: 24)
                                 .cornerRadius(12)
                                 .animation(.easeOut(duration: 0.1), value: viewModel.audioLevel)
-                            
-                            Rectangle()
-                                .fill(Color.white.opacity(0.3))
-                                .frame(width: 2, height: 24)
-                                .offset(x: geometry.size.width * 0.1)
-                            
-                            Rectangle()
-                                .fill(Color.white.opacity(0.3))
-                                .frame(width: 2, height: 24)
-                                .offset(x: geometry.size.width * 0.5)
                         }
                     }
                     .frame(height: 24)
                     
-                    // 电平数值和流量统计
+                    // 电平数值
                     HStack {
                         Text("Level: \(String(format: "%.3f", viewModel.audioLevel))")
                             .font(.system(.caption, design: .monospaced))
@@ -179,68 +232,6 @@ struct ContentView: View {
                                 .foregroundColor(.green)
                         }
                     }
-                    
-                    // 流量统计
-                    if viewModel.totalChunks > 0 {
-                        Divider()
-                        
-                        HStack(spacing: 16) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Traffic Statistics")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                HStack(spacing: 12) {
-                                    // 发送块数
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "arrow.up.circle.fill")
-                                            .foregroundColor(.blue)
-                                            .font(.caption)
-                                        Text("\(viewModel.sentChunks)")
-                                            .font(.system(.caption, design: .monospaced))
-                                    }
-                                    
-                                    // 跳过块数
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.gray)
-                                            .font(.caption)
-                                        Text("\(viewModel.skippedChunks)")
-                                            .font(.system(.caption, design: .monospaced))
-                                    }
-                                    
-                                    // 总块数
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "square.grid.3x3.fill")
-                                            .foregroundColor(.secondary)
-                                            .font(.caption)
-                                        Text("\(viewModel.totalChunks)")
-                                            .font(.system(.caption, design: .monospaced))
-                                    }
-                                }
-                            }
-                            
-                            Spacer()
-                            
-                            // 节省百分比
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("Saved")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                HStack(spacing: 4) {
-                                    Text("\(viewModel.trafficSavedPercent)%")
-                                        .font(.system(.body, design: .monospaced))
-                                        .fontWeight(.bold)
-                                        .foregroundColor(viewModel.trafficSavedPercent > 50 ? .green : .orange)
-                                    
-                                    Text("(\(viewModel.formattedTrafficSaved))")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                    }
                 }
                 .padding()
                 .background(Color.gray.opacity(0.1))
@@ -255,17 +246,10 @@ struct ContentView: View {
                 if viewModel.currentSubtitle.isEmpty {
                     if viewModel.isRecording {
                         HStack(spacing: 8) {
-                            if viewModel.isSilent {
-                                Image(systemName: "speaker.slash")
-                                    .foregroundColor(.gray)
-                                Text("Silence detected - waiting for speech...")
-                                    .foregroundColor(.secondary)
-                            } else {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                Text("Listening...")
-                                    .foregroundColor(.secondary)
-                            }
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Listening...")
+                                .foregroundColor(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
@@ -367,7 +351,7 @@ struct ContentView: View {
             Spacer()
         }
         .padding()
-        .frame(minWidth: 800, minHeight: 600)
+        .frame(minWidth: 600, minHeight: 600)
         .alert("Microphone Permission Required", isPresented: $viewModel.showPermissionAlert) {
             Button("Open System Settings") {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
@@ -381,9 +365,14 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Helper Extension
+
+extension Optional where Wrapped == String {
+    var isNilOrEmpty: Bool {
+        return self?.isEmpty ?? true
+    }
+}
+
 #Preview {
     ContentView()
 }
-
-
-
