@@ -135,7 +135,11 @@ struct ContentView: View {
                                         endPoint: .trailing
                                     )
                                 )
-                                .frame(width: CGFloat(viewModel.audioLevel) * geometry.size.width * 2.0, height: 24)
+                                .frame(
+                                    width: geometry.size.width * CGFloat(min(sqrt(viewModel.audioLevel * 10.0), 1.0)),
+            
+                                    height: 24
+                                )
                                 .cornerRadius(12)
                                 .animation(.easeOut(duration: 0.1), value: viewModel.audioLevel)
                             
@@ -380,4 +384,6 @@ struct ContentView: View {
 #Preview {
     ContentView()
 }
+
+
 

@@ -9,32 +9,34 @@ from urllib.parse import urlencode
 import httpx
 import websockets
 
+
+
 @dataclass
 class ElevenLabsConfig:
     """
     Configuration for an ElevenLabs realtime transcription session.
-
-    - audio_format: e.g. "pcm_16000"
-    - sample_rate: must match the actual audio content (8000-48000)
-    - language_code: ISO-639 code or None for auto-detect
-    - timestamps_granularity: "word" if you want word-level timestamps
-    - mode: app-level mode, "lecture" or "discussion"
-    - model_id: Scribe realtime model ID
-    - commit_strategy: "manual" or "vad"
-    - vad_*: VAD-related settings used when commit_strategy = "vad"
+    
+    Note: Default values are managed in config.py (ModeConfig).
+    This class is just a data container for the connection parameters.
     """
-    audio_format: str = "pcm_16000"
-    sample_rate: int = 16000
-    language_code: Optional[str] = None
-    timestamps_granularity: str = "word"
-    mode: str = "lecture"
-
-    model_id: str = "scribe_v2_realtime"
-    commit_strategy: str = "vad"
-    vad_silence_threshold_secs: Optional[float] = 0.5
-    vad_threshold: Optional[float] = 0.4
-    min_speech_duration_ms: Optional[int] = 250
-
+    # Audio settings
+    audio_format: str
+    sample_rate: int
+    language_code: Optional[str]
+    timestamps_granularity: str
+    model_id: str
+    
+    # App-level mode (for logging/reference)
+    mode: str
+    
+    # Commit strategy
+    commit_strategy: str
+    
+    # VAD settings (used when commit_strategy = "vad")
+    vad_silence_threshold_secs: Optional[float] = None
+    vad_threshold: Optional[float] = None
+    min_speech_duration_ms: Optional[int] = None
+    min_silence_duration_ms: Optional[int] = None
 
 class ElevenLabsRealtimeClient:
     """
@@ -142,6 +144,8 @@ class ElevenLabsRealtimeClient:
                 params["vad_threshold"] = str(self.config.vad_threshold)
             if self.config.min_speech_duration_ms is not None:
                 params["min_speech_duration_ms"] = str(self.config.min_speech_duration_ms)
+            if self.config.min_silence_duration_ms is not None:
+                params["min_silence_duration_ms"] = str(self.config.min_silence_duration_ms)
 
         url = f"{base_url}?{urlencode(params)}"
         print(f"[ElevenLabsRealtimeClient] Connecting to {url[:100]}...")

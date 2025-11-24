@@ -19,8 +19,8 @@ final class AudioCaptureService {
     private var chunkCount = 0
     
     // 静音检测配置
-    private let silenceThreshold: Float = 0.01          // 静音阈值
-    private let silenceFramesThreshold: Int = 50       // 连续静音帧数阈值
+    private let silenceThreshold: Float = 0.5          // 静音阈值
+    private let silenceFramesThreshold: Int = 500       // 连续静音帧数阈值
     private var silentFramesCount: Int = 0             // 当前连续静音帧计数
     private var isSilent: Bool = false                  // 是否处于静音状态
     
@@ -122,50 +122,50 @@ final class AudioCaptureService {
             // 计算音频电平
             let audioLevel = self.calculateAudioLevel(buffer: buffer)
             self.onAudioLevel?(audioLevel)
-            
-            // 静音检测
-            let isCurrentlySilent = audioLevel < self.silenceThreshold
-            
-            if isCurrentlySilent {
-                self.silentFramesCount += 1
-            } else {
-                self.silentFramesCount = 0
-            }
-            
-            // 检查是否进入/退出静音状态
-            let wasInSilence = self.isSilent
-            self.isSilent = self.silentFramesCount >= self.silenceFramesThreshold
-            
-            // 状态变化时通知
-            if wasInSilence != self.isSilent {
-                DispatchQueue.main.async {
-                    self.onSilenceStateChanged?(self.isSilent)
-                }
-                
-                if self.isSilent {
-                    print("🔇 Entered silence state (no audio will be sent)")
-                } else {
-                    print("🔊 Exited silence state (resuming audio transmission)")
-                }
-            }
-            
-            // 如果处于静音状态，跳过发送
-            if self.isSilent {
-                self.skippedChunks += 1
-                
-                // 每 50 个跳过的块打印一次统计
-                if self.skippedChunks % 50 == 0 {
-                    let savedPercent = Int(Double(self.skippedChunks) / Double(self.totalChunks) * 100)
-                    print("📊 Traffic saved: \(self.skippedChunks)/\(self.totalChunks) chunks (\(savedPercent)%)")
-                }
-                
-                // 更新统计
-                DispatchQueue.main.async {
-                    self.onStatisticsUpdated?(self.totalChunks, self.sentChunks, self.skippedChunks)
-                }
-                
-//                return  // 跳过发送
-            }
+//            
+//            // 静音检测
+//            let isCurrentlySilent = audioLevel < self.silenceThreshold
+//            
+//            if isCurrentlySilent {
+//                self.silentFramesCount += 1
+//            } else {
+//                self.silentFramesCount = 0
+//            }
+//            
+//            // 检查是否进入/退出静音状态
+//            let wasInSilence = self.isSilent
+//            self.isSilent = self.silentFramesCount >= self.silenceFramesThreshold
+//            
+//            // 状态变化时通知
+//            if wasInSilence != self.isSilent {
+//                DispatchQueue.main.async {
+//                    self.onSilenceStateChanged?(self.isSilent)
+//                }
+//                
+//                if self.isSilent {
+//                    print("🔇 Entered silence state (no audio will be sent)")
+//                } else {
+//                    print("🔊 Exited silence state (resuming audio transmission)")
+//                }
+//            }
+//            
+//            // 如果处于静音状态，跳过发送
+//            if self.isSilent {
+//                self.skippedChunks += 1
+//                
+//                // 每 50 个跳过的块打印一次统计
+//                if self.skippedChunks % 50 == 0 {
+//                    let savedPercent = Int(Double(self.skippedChunks) / Double(self.totalChunks) * 100)
+//                    print("📊 Traffic saved: \(self.skippedChunks)/\(self.totalChunks) chunks (\(savedPercent)%)")
+//                }
+//                
+//                // 更新统计
+//                DispatchQueue.main.async {
+//                    self.onStatisticsUpdated?(self.totalChunks, self.sentChunks, self.skippedChunks)
+//                }
+//                
+////                return  // 跳过发送
+//            }
             
             // 前 3 个块打印调试信息
             if self.chunkCount <= 3 {
