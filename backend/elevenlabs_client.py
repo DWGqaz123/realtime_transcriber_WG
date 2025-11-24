@@ -31,7 +31,7 @@ class ElevenLabsConfig:
 
     model_id: str = "scribe_v2_realtime"
     commit_strategy: str = "vad"
-    vad_silence_threshold_secs: Optional[float] = 1.5
+    vad_silence_threshold_secs: Optional[float] = 0.5
     vad_threshold: Optional[float] = 0.4
     min_speech_duration_ms: Optional[int] = 250
 
@@ -56,6 +56,11 @@ class ElevenLabsRealtimeClient:
         self._ws: Any = None
         self._connected: bool = False
         self._last_chunk_had_audio: bool = False  # Track if we've sent audio since last commit
+        
+        # 🔧 新增：连接健康检查
+        self._last_audio_time: float = 0.0  # 最后发送音频的时间
+        self._reconnect_lock = asyncio.Lock()  # 重连锁，避免并发重连
+        
 
     async def _fetch_single_use_token(self) -> str:
         """
@@ -146,6 +151,8 @@ class ElevenLabsRealtimeClient:
             self._ws = await websockets.connect(
                 url,
                 max_size=16 * 1024 * 1024,  # 16MB max message size
+                ping_interval=20,  # 🔧 新增：每20秒发送ping保持连接
+                ping_timeout=10,   # 🔧 新增：ping超时10秒
             )
         except Exception as exc:
             print(f"[ElevenLabsRealtimeClient] Failed to connect: {exc}")
@@ -154,6 +161,7 @@ class ElevenLabsRealtimeClient:
             raise
 
         self._connected = True
+        self._last_audio_time = asyncio.get_event_loop().time()  # 🔧 新增：记录连接时间
         print("[ElevenLabsRealtimeClient] Connected successfully")
 
         # Start background receive loop
@@ -173,9 +181,30 @@ class ElevenLabsRealtimeClient:
         Args:
         - audio_bytes: Raw PCM audio data (16-bit, mono, 16kHz recommended)
         """
+        # 🔧 新增：检查连接状态
+        if not self._connected or self._ws is None or self._ws.close_code:
+            print("[ElevenLabsRealtimeClient] ⚠️ Connection lost, attempting to reconnect...")
+            
+            # 使用锁避免多次并发重连
+            async with self._reconnect_lock:
+                # 双重检查：可能其他协程已经重连成功
+                if not self._connected or self._ws is None or self._ws.close_code:
+                    try:
+                        print("[ElevenLabsRealtimeClient] Reconnecting...")
+                        await self.close()  # 先清理旧连接
+                        await self.connect()  # 重新连接
+                        print("[ElevenLabsRealtimeClient] ✅ Reconnected successfully")
+                    except Exception as e:
+                        print(f"[ElevenLabsRealtimeClient] ❌ Reconnection failed: {e}")
+                        return  # 跳过这个音频块
+        
+        # 再次检查连接（重连可能失败）
         if not self._connected or self._ws is None:
-            print("[ElevenLabsRealtimeClient] Cannot send audio, not connected")
+            print("[ElevenLabsRealtimeClient] Cannot send audio, not connected after reconnect attempt")
             return
+
+        # 🔧 新增：更新最后发送时间
+        self._last_audio_time = asyncio.get_event_loop().time()
 
         b64_audio = base64.b64encode(audio_bytes).decode("ascii")
 
@@ -192,6 +221,9 @@ class ElevenLabsRealtimeClient:
         try:
             await self._ws.send(json.dumps(payload))
             self._last_chunk_had_audio = True
+        except websockets.exceptions.ConnectionClosed as exc:
+            print(f"[ElevenLabsRealtimeClient] ❌ Connection closed during send: {exc}")
+            self._connected = False
         except Exception as exc:
             print(f"[ElevenLabsRealtimeClient] Failed to send audio chunk: {exc}")
             raise
@@ -289,9 +321,43 @@ class ElevenLabsRealtimeClient:
         except asyncio.CancelledError:
             print("[ElevenLabsRealtimeClient] Receive loop cancelled")
             raise
+        except websockets.exceptions.ConnectionClosed as exc:
+            print(f"[ElevenLabsRealtimeClient] Connection closed: {exc}")
+            self._connected = False
         except Exception as exc:
             print(f"[ElevenLabsRealtimeClient] Receive loop error: {exc}")
             self._connected = False
+        
+    def is_alive(self) -> bool:
+        """
+        检查连接是否存活
+        
+        Returns:
+        - True if connected and WebSocket is open
+        - False otherwise
+        """
+        if not self._connected or self._ws is None:
+            return False
+        
+        # 对于 websockets 库，检查连接状态
+        try:
+            # websockets.ClientConnection 没有 closed 属性
+            # 检查 close_code 是否为 None（None 表示连接未关闭）
+            return self._ws.close_code is None
+        except AttributeError:
+            # 如果没有 close_code 属性，假设连接存活
+            return self._connected
+    
+    def get_idle_time(self) -> float:
+        """
+        获取自上次发送音频以来的空闲时间（秒）
+        
+        Returns:
+        - 空闲时间（秒）
+        """
+        if self._last_audio_time == 0.0:
+            return 0.0
+        return asyncio.get_event_loop().time() - self._last_audio_time
 
     async def close(self) -> None:
         """

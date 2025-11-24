@@ -1,3 +1,4 @@
+# backend/session_manager.py (Improved Version)
 import asyncio
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Any
@@ -7,7 +8,7 @@ from uuid import uuid4
 from run_logger import RunLogger
 from elevenlabs_client import ElevenLabsRealtimeClient, ElevenLabsConfig
 import os
-
+import time
 
 @dataclass
 class Session:
@@ -28,6 +29,8 @@ class Session:
     is_active: bool = True
     meta: Dict[str, Any] = field(default_factory=dict)
     manual_commit_task: Optional[asyncio.Task] = None
+    last_audio_time: float = 0.0  
+
 
 
 class SessionManager:
@@ -67,33 +70,30 @@ class SessionManager:
         - 20s: Lecture mode (continuous professor lectures)
         """
         mode = mode.lower()
-        
-        if mode == "discussion":
-            # Discussion mode uses manual commit with optimal 12s interval
+    
+        if mode == "lecture": #use manual commit for lecture
             return ElevenLabsConfig(
                 audio_format="pcm_16000",
                 sample_rate=16000,
                 language_code=None,
                 timestamps_granularity="word",
                 mode=mode,
-                commit_strategy="manual",
-                # Manual strategy doesn't use VAD parameters
+                commit_strategy="manual",  # manual
                 vad_silence_threshold_secs=None,
                 vad_threshold=None,
                 min_speech_duration_ms=None,
             )
-        else:
-            # Lecture mode uses VAD for natural pause detection
+        else: # discussion
             return ElevenLabsConfig(
                 audio_format="pcm_16000",
                 sample_rate=16000,
                 language_code=None,
                 timestamps_granularity="word",
-                mode="lecture",
-                commit_strategy="vad",
-                vad_silence_threshold_secs=1.5,  # Treat 1.5s silence as end of segment
-                vad_threshold=0.4,               # Voice activity detection threshold
-                min_speech_duration_ms=250,      # Minimum speech duration
+                mode=mode,
+                commit_strategy="vad",  
+                vad_silence_threshold_secs=0.5,  # Discussion mode parameters
+                vad_threshold=0.3,
+                min_speech_duration_ms=200,
             )
 
     async def create_session(self, websocket: WebSocket) -> Session:
@@ -327,6 +327,50 @@ class SessionManager:
             return
 
         print(f"[SessionManager] Audio chunk from {session_id}: {len(data)} bytes")
+        session.last_audio_time = time.time()
+
+        # check ElevenLabs connection health，reconnect if needed
+        if not session.eleven_client.is_alive():
+            print(f"[SessionManager] ⚠️ ElevenLabs connection is dead for {session_id}, attempting to reconnect...")
+            
+            idle_time = time.time() - session.last_audio_time
+            print(f"[SessionManager] Connection was idle for {idle_time:.1f}s")
+            
+            try:
+                # reconnect
+                await session.eleven_client.close()
+                await session.eleven_client.connect()
+                print(f"[SessionManager] ✅ Reconnected to ElevenLabs for {session_id}")
+                
+                # if in discussion mode, restart manual commit task
+                mode = session.meta.get("mode", "lecture")
+                if mode == "discussion":
+                    # cancel existing task if any
+                    if session.manual_commit_task is not None:
+                        session.manual_commit_task.cancel()
+                        try:
+                            await session.manual_commit_task
+                        except asyncio.CancelledError:
+                            pass
+                    
+                    # restart manual commit task
+                    commit_interval = 12.0
+                    session.manual_commit_task = asyncio.create_task(
+                        self._manual_commit_loop(session_id, commit_interval)
+                    )
+                    print(f"[SessionManager] Restarted manual commit loop after reconnection")
+                
+            except Exception as e:
+                error_msg = f"Failed to reconnect to ElevenLabs: {str(e)}"
+                print(f"[SessionManager] ❌ {error_msg}")
+                
+                try:
+                    await session.websocket.send_text(f"[error] {error_msg}")
+                except Exception:
+                    pass
+                return
+
+        print(f"[SessionManager] Audio chunk from {session_id}: {len(data)} bytes")
 
         # Forward to ElevenLabs
         try:
@@ -408,11 +452,15 @@ class SessionManager:
                     break
 
                 if session.eleven_client is not None:
+                    # 🔧 新增：检查连接
+                    if not session.eleven_client.is_alive():
+                        print(f"[SessionManager] ⚠️ Skipping commit - connection not alive for {session_id}")
+                        continue
+                    
                     try:
-                        # Send a commit signal to ElevenLabs
-                        # Note: This requires implementing send_commit() in elevenlabs_client.py
-                        # For now, we log it
-                        print(f"[SessionManager] Manual commit triggered for {session_id}")
+                        # 🔧 修改：实际发送 commit
+                        await session.eleven_client.send_commit()
+                        print(f"[SessionManager] ✅ Manual commit sent for {session_id}")
                         
                         if self.run_logger is not None:
                             self.run_logger.log_event(
@@ -420,11 +468,8 @@ class SessionManager:
                                 {"type": "manual_commit", "interval": interval}
                             )
                         
-                        # TODO: Implement actual commit sending
-                        # await session.eleven_client.send_commit()
-                        
                     except Exception as exc:
-                        print(f"[SessionManager] Error in manual commit: {exc}")
+                        print(f"[SessionManager] ❌ Error sending manual commit: {exc}")
 
         except asyncio.CancelledError:
             print(f"[SessionManager] Manual commit loop cancelled for {session_id}")
