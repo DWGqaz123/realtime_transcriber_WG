@@ -14,14 +14,20 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            // 侧边栏：项目列表
             ProjectSidebarView(viewModel: projectViewModel)
         } detail: {
-            // 主内容区：录音界面
             RecordingView(
                 viewModel: viewModel,
                 projectViewModel: projectViewModel
             )
+            // 🔧 使用新版 onChange API
+            .onChange(of: projectViewModel.selectedProject) { oldValue, newValue in
+                viewModel.currentProjectId = newValue?.id
+                print("📁 Project changed: \(newValue?.name ?? "none")")
+            }
+            .onAppear {
+                viewModel.currentProjectId = projectViewModel.selectedProject?.id
+            }
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -120,6 +126,31 @@ struct RecordingView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(viewModel.isRecording ? .red : .blue)
                 .disabled(projectViewModel.selectedProject == nil && !viewModel.isRecording)
+                
+                // Save button
+                if !viewModel.isRecording && !viewModel.fullTranscript.isEmpty {
+                    Button(action: {
+                        viewModel.saveSession()
+                        
+                        // refresh list after saving
+                        Task {
+                            // 等待一小段时间，确保后端保存完成
+                            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5秒
+                            
+                            await projectViewModel.loadProjects()
+                            await projectViewModel.refreshSelectedProject()
+                        }
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "square.and.arrow.down.fill")
+                            Text("Save Session")
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                }
 
                 // 录音状态指示器
                 if viewModel.isRecording {

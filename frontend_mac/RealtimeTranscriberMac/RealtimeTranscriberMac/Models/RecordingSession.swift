@@ -15,6 +15,7 @@ struct RecordingSession: Identifiable, Codable, Hashable {
     let charCount: Int
     let startedAt: Date
     let endedAt: Date?
+    let transcriptText: String?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -24,6 +25,7 @@ struct RecordingSession: Identifiable, Codable, Hashable {
         case charCount = "char_count"
         case startedAt = "started_at"
         case endedAt = "ended_at"
+        case transcriptText = "transcript_text"
     }
     
     // 格式化时长
@@ -49,8 +51,29 @@ struct RecordingSession: Identifiable, Codable, Hashable {
         return formatter.string(from: startedAt)
     }
     
+    // 格式化模式显示
+    var modeDisplayName: String {
+        switch mode.lowercased() {
+        case "lecture":
+            return "Lecture"
+        case "discussion":
+            return "Discussion"
+        default:
+            return mode.capitalized
+        }
+    }
+    
     // 会话状态
     var isCompleted: Bool {
         return endedAt != nil
     }
+    // 转录预览（前 100 个字符）
+    var transcriptPreview: String {
+            guard let text = transcriptText, !text.isEmpty else {
+                return "No transcript"
+            }
+            
+            let preview = text.prefix(100)
+            return preview.count < text.count ? "\(preview)..." : String(preview)
+        }
 }

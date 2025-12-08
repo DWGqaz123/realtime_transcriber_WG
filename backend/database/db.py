@@ -76,12 +76,10 @@ class DatabaseManager:
         """根据 ID 获取项目"""
         db = DatabaseManager.get_db()
         try:
-            # 🔧 预加载 sessions
             project = db.query(Project).options(
                 joinedload(Project.sessions)
             ).filter(Project.id == project_id).first()
             
-            # 🔧 触发加载
             if project:
                 _ = len(project.sessions)
             
@@ -168,3 +166,15 @@ class DatabaseManager:
             return sessions
         finally:
             db.close()
+    
+    @staticmethod
+    def get_session_by_id(session_id: int) -> Optional[Session]:
+        """根据 ID 获取会话"""
+        db = DatabaseManager.get_db()
+        try:
+            session = db.query(Session).filter(Session.id == session_id).first()
+            return session
+        finally:
+            db.close()
+    
+    

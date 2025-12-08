@@ -59,7 +59,7 @@ class TranscriptionConfig:
         commit_interval=None,  # Not used in VAD mode
         
         # VAD settings
-        vad_silence_threshold_secs=1.5,  # Commit after 1.5s silence
+        vad_silence_threshold_secs= 0.5,  # Commit after 1 s silence
         vad_threshold=0.4,               # Voice activity threshold
         min_speech_duration_ms=300,     # Minimum speech duration 
         min_silence_duration_ms=300,    # Minimum silence duration 

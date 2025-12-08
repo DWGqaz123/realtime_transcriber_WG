@@ -27,14 +27,11 @@ All events and summaries during the experiment are automatically disked to runs/
 We compared the two official segmentation modes:
 
 VAD Mode (Voice Activity Detection)
-	•	~10 committed segments for a 30-second sample
-	•	Commit every 2–3 seconds
 	•	Suitable for conversations, interviews, meetings
 	•	Fastest “finalized” text and most responsive UI
 	•	But breaks long sentences → not ideal for lectures
 
-Manual Mode (commit every 15 seconds)
-	•	Exactly 2 segments for the 30-second sample
+Manual Mode (commit every 35 seconds)
 	•	Predictable, clean paragraph chunks
 	•	Much more natural for continuous speech
 	•	Ideal for:
@@ -42,29 +39,35 @@ Manual Mode (commit every 15 seconds)
 	•	Long explanations
 	•	Notes summarization
 
-## Experiment C
-### 1. Commit interval = **8 seconds**
-- Produces short, sentence-level segments  
-- Highly responsive, good for dictation or short-turn speech  
-- Too fragmented for long explanations  
-→ Best for **Dictation Mode** or fast-paced Q&A
 
-### 2. Commit interval = **12 seconds**
-- Produces natural, readable segments (1–2 sentences each)  
-- Excellent balance between semantic completeness and real-time updates  
-- Matches the rhythm of student presentations or structured speaking  
-→ Test1 shows **12s is the optimal value** for presentations  
-→ Recommended default for **Presentation Mode / Medium-length speech**
+```
 
-### 3. Commit interval = **20 seconds**
-- Forms longer, more coherent paragraph-like segments  
-- Matches continuous lecture-style speech  
-- Less real-time feedback, but best semantic structure  
-→ Test2 shows **20s performs best** for continuous professor lectures  
-→ Recommended default for **Lecture Mode (long-form speech)**
+    ---
 
-## Experiment D
+    ## 🎨 文件格式示例
 
-More VAD parameters adjuestment  TBD
+    ### 保存的文件内容：
+    ```
+    Project: CMU test project
+    Mode: lecture
+    Date: 2025-12-01 14:30:15
+    ============================================================
 
+    Hello, this is a test of the realtime transcription system.
+    Today we will discuss the fundamentals of machine learning.
+    The key concepts include supervised learning, unsupervised learning, and reinforcement learning.
+    ```
 
+    ---
+
+    ## 📂 目录结构
+    ```
+    ~/Documents/RealtimeTranscriber/
+    ├── CMU test project/
+    │   ├── 2025-12-01_14-30-15_lecture.txt      (320 bytes)
+    │   ├── 2025-12-01_15-45-22_discussion.txt   (456 bytes)
+    │   └── 2025-12-01_16-20-10_lecture.txt      (892 bytes)
+    │
+    └── Test Project/
+        ├── 2025-12-01_17-05-33_lecture.txt      (234 bytes)
+        └── 2025-12-01_18-12-44_discussion.txt   (567 bytes)

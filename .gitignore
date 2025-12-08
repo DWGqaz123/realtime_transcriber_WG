@@ -51,6 +51,9 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Transcript files (user data)
+backend/transcripts/
+
 # Translations
 *.mo
 *.pot
@@ -221,3 +224,8 @@ DerivedData/
 
 # If Xcode generates any user-specific data
 *.xcuserdatad
+
+
+# create transcripts directory to be ignored by git
+mkdir -p backend/transcripts
+touch backend/transcripts/.gitkeep

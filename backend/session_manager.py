@@ -1,7 +1,7 @@
 # backend/session_manager.py (Improved Version)
 import asyncio
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from fastapi import WebSocket
 from uuid import uuid4
 from config import TranscriptionConfig 
@@ -22,7 +22,15 @@ class Session:
     meta: Dict[str, Any] = field(default_factory=dict)
     manual_commit_task: Optional[asyncio.Task] = None
     last_audio_time: float = 0.0
-
+    
+        # session ID in the database
+    db_session_id: Optional[int] = None
+    is_saved: bool = False
+    
+    # statistics
+    start_time: float = field(default_factory=lambda: time.time())
+    transcript_parts: List[str] = field(default_factory=list)
+    
 
 
 class SessionManager:
@@ -111,14 +119,19 @@ class SessionManager:
         4. Close WebSocket (if not already closed by client)
         5. Notify RunLogger
         6. Remove from sessions dictionary
+        
+        Note: Does NOT auto-save session data - user must explicitly call SAVE
         """
         session = self.sessions.get(session_id)
         if not session:
             print(f"[SessionManager] Session {session_id} not found, already closed?")
             return
 
-        session.is_active = False
         print(f"[SessionManager] Closing session {session_id}")
+    
+        
+        # Mark inactive
+        session.is_active = False
 
         # Cancel manual commit task if running
         if session.manual_commit_task is not None:
@@ -157,6 +170,178 @@ class SessionManager:
         # Remove session from dictionary
         del self.sessions[session_id]
         print(f"[SessionManager] Session {session_id} fully cleaned up")
+        
+    
+    async def _save_session_to_db(self, session_id: str) -> None:
+        """
+        save the current session's transcript to the database.
+        """
+        session = self.sessions.get(session_id)
+        if session is None:
+            print(f"[SessionManager] Cannot save: session {session_id} not found")
+            return
+        
+        # check if already saved
+        if session.is_saved:
+            print(f"[SessionManager] Session {session_id} already saved")
+            try:
+                await session.websocket.send_text("[save] Session already saved")
+            except:
+                pass
+            return
+        
+        # check if db_session_id exists
+        if session.db_session_id is None:
+            print(f"[SessionManager] Cannot save: no db_session_id for session {session_id}")
+            try:
+                await session.websocket.send_text("[save] ERROR: No database session")
+            except:
+                pass
+            return
+        
+        # check if there is any transcript to save
+        if not session.transcript_parts:
+            print(f"[SessionManager] Cannot save: no transcript for session {session_id}")
+            try:
+                await session.websocket.send_text("[save] ERROR: No transcript to save")
+            except:
+                pass
+            return
+        
+        # save to database
+        try:
+            from database.db import DatabaseManager
+            from datetime import datetime
+            
+            # calculate duration
+            duration = int(time.time() - session.start_time)
+            
+            # combine transcript parts
+            full_transcript = "\n".join(session.transcript_parts)
+            
+            # satistics
+            sentence_count = len(session.transcript_parts)
+            char_count = len(full_transcript)
+            
+            # renew session record in database
+            DatabaseManager.update_session(
+                session_id=session.db_session_id,
+                duration_seconds=duration,
+                transcript_text=full_transcript,
+                sentence_count=sentence_count,
+                char_count=char_count,
+                ended_at=datetime.utcnow()
+            )
+            
+            # mark as saved
+            session.is_saved = True
+
+            print(f"[SessionManager] ✅ Saved session to DB: {duration}s, {sentence_count} sentences, {char_count} chars")
+
+            # save to local file (if project_id available)
+            project_id = session.meta.get("project_id")
+            if project_id is not None:
+                try:
+                    # fetch project info
+                    project = DatabaseManager.get_project_by_id(project_id)
+                    if project:
+                        # determine mode
+                        mode = session.meta.get("mode", "unknown")
+                        
+                        # save to file
+                        filepath = self._save_transcript_to_file(
+                            project_name=project.name,
+                            mode=mode,
+                            transcript_text=full_transcript,
+                            started_at=DatabaseManager.get_session_by_id(session.db_session_id).started_at.isoformat() if session.db_session_id else datetime.utcnow().isoformat()
+                        )
+                        
+                        if filepath:
+                            print(f"[SessionManager] 📄 File saved: {filepath}")
+                    else:
+                        print(f"[SessionManager] ⚠️ Project {project_id} not found for file export")
+                except Exception as exc:
+                    print(f"[SessionManager] ❌ Failed to export to file: {exc}")
+
+            # notify client
+            try:
+                await session.websocket.send_text(f"[save] Session saved successfully ({sentence_count} sentences, {char_count} chars)")
+            except Exception as exc:
+                print(f"[SessionManager] Failed to send save confirmation: {exc}")
+            
+        except Exception as exc:
+            print(f"[SessionManager] ❌ Failed to save session to DB: {exc}")
+            import traceback
+            traceback.print_exc()
+            
+            try:
+                await session.websocket.send_text(f"[save] ERROR: {str(exc)}")
+            except:
+                pass
+    
+    def _save_transcript_to_file(
+        self,
+        project_name: str,
+        mode: str,
+        transcript_text: str,
+        started_at: str) -> Optional[str]:
+        """
+        Save the transcript to /transcripts.
+        
+        Args:
+            project_name: project name for directory
+            mode:  (lecture/discussion)
+            transcript_text: full transcript content
+            started_at: start time in ISO format string
+        
+        Returns:
+            The file path if saved successfully, else None.
+        """
+        try:
+            from pathlib import Path
+            from datetime import datetime
+            
+            # Base directory            
+            current_dir = Path(__file__).parent
+            base_dir = current_dir / "transcripts"
+
+            safe_project_name = "".join(c for c in project_name if c.isalnum() or c in (' ', '-', '_')).strip()
+            project_dir = base_dir / safe_project_name
+            
+            # create directories if not exist
+            project_dir.mkdir(parents=True, exist_ok=True)
+
+            
+            # filename with timestamp
+            # eg. 2025-12-01_14-30-15_lecture.txt
+            try:
+                dt = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+            except:
+                dt = datetime.now()
+            
+            timestamp = dt.strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"{timestamp}_{mode}.txt"
+            filepath = project_dir / filename
+            
+            # write to file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                # write metadata header
+                f.write(f"Project: {project_name}\n")
+                f.write(f"Mode: {mode}\n")
+                f.write(f"Date: {dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"=" * 60 + "\n\n")
+                
+                # write transcript
+                f.write(transcript_text)
+            
+            print(f"[SessionManager] 📄 Transcript saved to file: {filepath}")
+            return str(filepath)
+            
+        except Exception as exc:
+            print(f"[SessionManager] ❌ Failed to save transcript to file: {exc}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     async def handle_text_message(self, session_id: str, text: str) -> None:
         """Handle a text message coming from the frontend client."""
@@ -166,6 +351,24 @@ class SessionManager:
             return
 
         stripped = text.strip()
+        
+        # PROJECT configuration
+        if stripped.upper().startswith("PROJECT:"):
+            try:
+                project_id_str = stripped.split(":", 1)[1].strip()
+                project_id = int(project_id_str)
+                session.meta["project_id"] = project_id
+                print(f"[SessionManager] Set project_id={project_id} for session {session_id}")
+                
+                try:
+                    await session.websocket.send_text(f"[config] project set to {project_id}")
+                except Exception as exc:
+                    print(f"[SessionManager] Failed to send project acknowledgment: {exc}")
+                
+                return
+            except (ValueError, IndexError) as exc:
+                print(f"[SessionManager] Invalid PROJECT message: {text}, error: {exc}")
+                return
 
         # 1) MODE configuration
         if stripped.upper().startswith("MODE:"):
@@ -212,10 +415,33 @@ class SessionManager:
                 success_msg = f"[config] mode set to {mode}, connected to ElevenLabs"
                 print(f"[SessionManager] {success_msg}")
                 
+                # 🔧 新增：创建数据库会话记录
+
                 try:
-                    await session.websocket.send_text(success_msg)
+                    from database.db import DatabaseManager
+                    project_id = session.meta.get("project_id")
+                    
+                    if project_id is not None:
+                        # 🔧 新增：检查是否已有未保存的会话
+                        if session.db_session_id is None or session.is_saved:
+                            # 创建新的数据库会话
+                            db_session = DatabaseManager.create_session(
+                                project_id=project_id,
+                                mode=mode
+                            )
+                            session.db_session_id = db_session.id
+                            session.is_saved = False
+                            session.start_time = time.time()  # 重置开始时间
+                            session.transcript_parts = []      # 清空转录（如果是新会话）
+                            print(f"[SessionManager] Created new DB session: {db_session.id} for project {project_id}")
+                        else:
+                            # 复用现有会话
+                            print(f"[SessionManager] Reusing existing DB session: {session.db_session_id}")
+                            # 不清空 transcript_parts，继续累积
+                    else:
+                        print(f"[SessionManager] ⚠️ No project_id in meta, skipping DB session creation")
                 except Exception as exc:
-                    print(f"[SessionManager] Failed to send success message: {exc}")
+                    print(f"[SessionManager] Failed to create/reuse DB session: {exc}")
 
                 # 🔧 使用集中配置的 commit_interval
                 if config.commit_strategy == "manual":
@@ -245,15 +471,31 @@ class SessionManager:
         # 2) STOP signal
         if stripped.upper() == "STOP":
             print(f"[SessionManager] Received STOP signal from {session_id}")
-            if self.run_logger is not None:
-                self.run_logger.log_event(session_id, {"type": "stop_signal"})
             
+            if session.manual_commit_task is not None:
+                session.manual_commit_task.cancel()
+                session.manual_commit_task = None
+                print(f"[SessionManager] Cancelled manual commit task for {session_id} on STOP ")
+            
+            if session.eleven_client is not None:
+                await session.eleven_client.close()
+                session.eleven_client = None
+                print(f"[SessionManager] Closed ElevenLabs client for {session_id} on STOP ")
+                
             try:
-                await session.websocket.send_text("[info] Recording stopped")
+                await session.websocket.send_text("[config] recording stopped, session kept alive")
             except Exception as exc:
                 print(f"[SessionManager] Failed to send stop acknowledgment: {exc}")
+    
             return
-
+        
+        
+        
+        if stripped.upper() == "SAVE":
+            print(f"[SessionManager] Received SAVE for session {session_id}")
+            await self._save_session_to_db(session_id)
+            return
+    
         # 3) Other text: simple echo
         print(f"[SessionManager] Text from {session_id}: {text}")
         echo_text = f"Echo: {text}"
@@ -377,6 +619,24 @@ class SessionManager:
 
         msg_type = "final" if is_final else "partial"
         payload = f"[{msg_type}] {text}"
+        
+        # record final transcripts
+        if is_final and text.strip():
+            session.transcript_parts.append(text.strip())
+            print(f"[SessionManager] 📝 Recorded final transcript: {len(text)} chars")
+
+        try:
+            await session.websocket.send_text(message)
+            print(f"[SessionManager] Pushed {prefix} transcript to {session_id}: {text[:50]}...")
+        except Exception as exc:
+            print(f"[SessionManager] Failed to push transcript: {exc}")
+
+        # Log event
+        if self.run_logger is not None:
+            self.run_logger.log_event(
+                session_id,
+                {"type": "transcript", "is_final": is_final, "text": text}
+            )
 
         try:
             await session.websocket.send_text(payload)

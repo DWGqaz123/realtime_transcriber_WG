@@ -19,6 +19,12 @@ class ProjectListViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var showError: Bool = false
     
+    @Published var projectSessions: [Int: [RecordingSession]] = [:]  // 项目ID -> sessions
+    @Published var expandedProjects: Set<Int> = []  // 展开的项目ID
+    @Published var selectedSession: RecordingSession?  // 选中的 session
+    @Published var showSessionDetail: Bool = false  // 是否显示详情浮窗
+    @Published var sessionDetailLoading: Bool = false  // 加载详情中
+    
     // MARK: - Private Properties
     
     private let projectService = ProjectService()
@@ -129,6 +135,99 @@ class ProjectListViewModel: ObservableObject {
         print("📁 Selected project: \(project.name)")
     }
     
+    // MARK: - Session Management
+
+    // 切换项目展开/收起状态
+    func toggleProjectExpansion(_ project: Project) {
+        if expandedProjects.contains(project.id) {
+            // 收起
+            expandedProjects.remove(project.id)
+            print("📁 Collapsed project: \(project.name)")
+        } else {
+            // 展开，并加载 sessions（不强制刷新，使用缓存）
+            expandedProjects.insert(project.id)
+            print("📂 Expanded project: \(project.name)")
+            Task {
+                await loadProjectSessions(project.id)  // 🔧 不传参数，默认 forceRefresh = false
+            }
+        }
+    }
+
+    /// 加载项目的 sessions
+    func loadProjectSessions(_ projectId: Int, forceRefresh: Bool = false) async {
+        // 如果已经加载过且不强制刷新，跳过
+        if !forceRefresh && projectSessions[projectId] != nil {
+            print("📦 Using cached sessions for project \(projectId)")
+            return
+        }
+        
+        do {
+            print("🔄 Loading sessions for project \(projectId)...")
+            let sessions = try await projectService.fetchProjectSessions(projectId: projectId)
+            self.projectSessions[projectId] = sessions
+            print("✅ Loaded \(sessions.count) sessions for project \(projectId)")
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+            print("❌ Failed to load sessions: \(error.localizedDescription)")
+        }
+    }
+
+    /// 选择并显示 session 详情
+    func selectSession(projectId: Int, session: RecordingSession) {
+        selectedSession = session
+        
+        // 如果 session 没有完整转录，从服务器加载
+        if session.transcriptText == nil || session.transcriptText!.isEmpty {
+            Task {
+                await loadSessionDetail(projectId: projectId, sessionId: session.id)
+            }
+        } else {
+            // 已有转录，直接显示
+            showSessionDetail = true
+        }
+    }
+
+    /// 加载 session 详情（包含完整转录）
+    private func loadSessionDetail(projectId: Int, sessionId: Int) async {
+        sessionDetailLoading = true
+        
+        do {
+            let detailSession = try await projectService.fetchSessionDetail(
+                projectId: projectId,
+                sessionId: sessionId
+            )
+            
+            // 更新缓存
+            if var sessions = projectSessions[projectId] {
+                if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+                    sessions[index] = detailSession
+                    projectSessions[projectId] = sessions
+                }
+            }
+            
+            // 更新选中的 session
+            selectedSession = detailSession
+            showSessionDetail = true
+            
+            print("✅ Loaded session detail: \(detailSession.transcriptText?.count ?? 0) chars")
+            
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+            print("❌ Failed to load session detail: \(error.localizedDescription)")
+        }
+        
+        sessionDetailLoading = false
+    }
+
+    /// 关闭 session 详情
+    func closeSessionDetail() {
+        showSessionDetail = false
+        selectedSession = nil
+    }
+    
+    
     /// Refresh current project data
     func refreshSelectedProject() async {
         guard let selected = selectedProject else { return }
@@ -141,8 +240,15 @@ class ProjectListViewModel: ObservableObject {
                 projects[index] = updated
                 selectedProject = updated
             }
+            // 🔧 新增：清除该项目的 session 缓存，强制重新加载
+            projectSessions[selected.id] = nil
             
-            print("✅ Refreshed project: \(updated.name)")
+            // 🔧 新增：如果项目是展开状态，重新加载 sessions
+            if expandedProjects.contains(selected.id) {
+                await loadProjectSessions(selected.id, forceRefresh: true)
+            }
+            
+            print("✅ Refreshed project: \(updated.name), sessions: \(updated.sessionCount)")
             
         } catch {
             errorMessage = error.localizedDescription

@@ -222,6 +222,45 @@ class ProjectService {
         }
     }
     
+    // MARK: - Fetch session detail
+
+    func fetchSessionDetail(projectId: Int, sessionId: Int) async throws -> RecordingSession {
+        guard let url = URL(string: "\(baseURL)/\(projectId)/sessions/\(sessionId)") else {
+            throw ProjectServiceError.invalidURL
+        }
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw ProjectServiceError.unknown
+            }
+            
+            guard (200...299).contains(httpResponse.statusCode) else {
+                throw ProjectServiceError.serverError(statusCode: httpResponse.statusCode)
+            }
+            
+            // 🔧 打印调试信息
+            if let jsonString = String(data: data, encoding: .utf8) {
+                print("📥 Session detail JSON: \(jsonString.prefix(200))...")
+            }
+            
+            let decoder = createDecoder()
+            let session = try decoder.decode(RecordingSession.self, from: data)
+            
+            print("✅ Successfully fetched session detail: \(session.id)")
+            return session
+            
+        } catch let error as ProjectServiceError {
+            throw error
+        } catch let error as DecodingError {
+            print("❌ Decoding error: \(error)")
+            throw ProjectServiceError.decodingError(error)
+        } catch {
+            throw ProjectServiceError.networkError(error)
+        }
+    }
+    
     // MARK: - Get single project
     
     func getProject(id: Int) async throws -> Project {

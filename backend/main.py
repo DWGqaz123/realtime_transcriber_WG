@@ -2,43 +2,59 @@
 
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
 from datetime import datetime
 import os
+from pathlib import Path
 from dotenv import load_dotenv
+
 load_dotenv()
+
 # ======= Import DatabaseManager =======
 try:
     from database.db import DatabaseManager
     print("✅ DatabaseManager imported successfully")
 except Exception as e:
     print(f"❌ Failed to import DatabaseManager: {e}")
+    import traceback
+    traceback.print_exc()
     DatabaseManager = None
 
+# ======= Import SessionManager and RunLogger =======
+SessionManager = None
+RunLogger = None
 
-# ======= DON'T INITIALIZE SessionManager HERE =======
-# ⭐️ FIXED: 不能在 import 阶段初始化 session_manager !!!
-session_manager = None
-run_logger = None
-
-
-# ======= Import class definitions only =======
-from pathlib import Path  # 👈 新增
-
-# 导入会话管理器和日志（只导入类，不在这里实例化）
 try:
-    from session_manager import SessionManager
     from run_logger import RunLogger
-    print("✅ SessionManager and RunLogger imported successfully")
+    print("✅ RunLogger imported successfully")
 except Exception as e:
-    print(f"⚠️ Warning: SessionManager not available: {e}")
-    SessionManager = None
+    print(f"❌ Failed to import RunLogger: {e}")
+    import traceback
+    traceback.print_exc()
     RunLogger = None
 
-# 👇 全局实例变量，初始为 None，由 startup_event 里创建
-run_logger: Optional["RunLogger"] = None
-session_manager: Optional["SessionManager"] = None
+try:
+    from session_manager import SessionManager
+    print("✅ SessionManager imported successfully")
+except Exception as e:
+    print(f"❌ Failed to import SessionManager: {e}")
+    import traceback
+    traceback.print_exc()
+    SessionManager = None
+
+# ======= Import Routes =======
+try:
+    from routes import projects
+    print("✅ Projects router imported successfully")
+except Exception as e:
+    print(f"❌ Failed to import projects router: {e}")
+    import traceback
+    traceback.print_exc()
+
+# 🔧 全局变量
+run_logger = None
+session_manager = None
+
+print(f"📊 After imports: SessionManager={SessionManager}, RunLogger={RunLogger}")
 
 # ========== 创建 FastAPI 应用 ==========
 
@@ -50,7 +66,6 @@ app = FastAPI(
 
 print("✅ FastAPI app created")
 
-
 # ========== CORS 配置 ==========
 
 app.add_middleware(
@@ -61,134 +76,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ========== 注册路由 ==========
 
-# ========== Pydantic 模型 ==========
-
-class ProjectCreate(BaseModel):
-    name: str
-    description: Optional[str] = ""
-
-
-class ProjectResponse(BaseModel):
-    id: int
-    name: str
-    description: Optional[str]
-    created_at: datetime
-    updated_at: datetime
-    session_count: int
-    
-    class Config:
-        from_attributes = True
-
-
-# ========== 项目 API 端点（不改动） ==========
-
-@app.get("/api/projects", response_model=List[ProjectResponse])
-async def get_all_projects():
-    if DatabaseManager is None:
-        raise HTTPException(status_code=500, detail="Database not available")
-    
-    try:
-        projects = DatabaseManager.get_all_projects()
-        print(f"📁 Retrieved {len(projects)} projects")
-        
-        return [
-            ProjectResponse(
-                id=p.id,
-                name=p.name,
-                description=p.description,
-                created_at=p.created_at,
-                updated_at=p.updated_at,
-                session_count=len(p.sessions)
-            )
-            for p in projects
-        ]
-    except Exception as e:
-        print(f"❌ Error in get_all_projects: {e}")
-        raise
-
-
-@app.post("/api/projects", response_model=ProjectResponse)
-async def create_project(project: ProjectCreate):
-    if DatabaseManager is None:
-        raise HTTPException(status_code=500, detail="Database not available")
-    
-    try:
-        db_project = DatabaseManager.create_project(
-            name=project.name,
-            description=project.description or ""
-        )
-        print(f"✅ Created project: {db_project.name}")
-        
-        return ProjectResponse(
-            id=db_project.id,
-            name=db_project.name,
-            description=db_project.description,
-            created_at=db_project.created_at,
-            updated_at=db_project.updated_at,
-            session_count=0
-        )
-    except Exception as e:
-        print(f"❌ Error in create_project: {e}")
-        raise
-
-
-@app.get("/api/projects/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: int):
-    if DatabaseManager is None:
-        raise HTTPException(status_code=500, detail="Database not available")
-    
-    project = DatabaseManager.get_project_by_id(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    return ProjectResponse(
-        id=project.id,
-        name=project.name,
-        description=project.description,
-        created_at=project.created_at,
-        updated_at=project.updated_at,
-        session_count=len(project.sessions)
-    )
-
-
-@app.delete("/api/projects/{project_id}")
-async def delete_project(project_id: int):
-    if DatabaseManager is None:
-        raise HTTPException(status_code=500, detail="Database not available")
-    
-    success = DatabaseManager.delete_project(project_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    print(f"🗑️ Deleted project: {project_id}")
-    return {"message": "Project deleted successfully"}
-
-
-@app.get("/api/projects/{project_id}/sessions")
-async def get_project_sessions(project_id: int):
-    if DatabaseManager is None:
-        raise HTTPException(status_code=500, detail="Database not available")
-    
-    sessions = DatabaseManager.get_project_sessions(project_id)
-    return [
-        {
-            "id": s.id,
-            "mode": s.mode,
-            "duration_seconds": s.duration_seconds,
-            "sentence_count": s.sentence_count,
-            "char_count": s.char_count,
-            "started_at": s.started_at.isoformat(),
-            "ended_at": s.ended_at.isoformat() if s.ended_at else None
-        }
-        for s in sessions
-    ]
-
+app.include_router(projects.router)
+print("✅ Projects router registered")
 
 # ========== 基础端点 ==========
 
 @app.get("/")
 async def root():
+    """API 根端点"""
     return {
         "message": "Realtime Transcriber API",
         "version": "2.0.0",
@@ -204,6 +101,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
+    """健康检查端点"""
     return {
         "status": "healthy",
         "database": "available" if DatabaseManager else "unavailable",
@@ -211,14 +109,14 @@ async def health_check():
     }
 
 
-# ========= ⭐️ FIXED: WebSocket 端点 =========
+# ========== WebSocket 端点 ==========
 
 @app.websocket("/ws/transcribe")
 async def websocket_endpoint(websocket: WebSocket):
-
+    """实时转录 WebSocket 端点"""
     await websocket.accept()
     print("✅ WebSocket connection accepted")
-    print(f"[{datetime.now()}] session_manager is:", session_manager)
+    print(f"[{datetime.now()}] session_manager is: {session_manager}")
 
     if session_manager is None:
         await websocket.send_text("ERROR: session_manager not available on server")
@@ -244,53 +142,82 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except Exception as e:
         print(f"❌ WebSocket error: {e}")
+        import traceback
+        traceback.print_exc()
 
     finally:
         await session_manager.close_session(session.id)
         print(f"🔚 Session closed: {session.id}")
 
 
-# ========= ⭐️ FIXED: Startup: 正确初始化 session_manager =========
+# ========== 启动事件 ==========
 
 @app.on_event("startup")
 async def startup_event():
-    """Application startup event"""
-    global run_logger, session_manager  # 👈 一定要声明 global 才能修改上面的全局变量
-
+    """应用启动事件"""
+    global run_logger, session_manager
+    
     print("\n" + "=" * 60)
     print("🚀 Realtime Transcriber API Starting...")
     print("=" * 60)
-
-    # ⭐️ 初始化 RunLogger
+    
+    print(f"\n📊 Class availability check:")
+    print(f"  - RunLogger class: {RunLogger is not None} ({RunLogger})")
+    print(f"  - SessionManager class: {SessionManager is not None} ({SessionManager})")
+    
+    # 初始化 RunLogger
     if RunLogger is not None:
         try:
-            # 关键修复点：传 Path 对象，而不是 str，这样 base_dir.mkdir() 就合法了
             run_logger = RunLogger(base_dir=Path("runs"))
-            print(f"✅ RunLogger initialized with base_dir={run_logger.base_dir}")
+            print(f"✅ RunLogger initialized: {run_logger}")
+            print(f"✅ RunLogger base_dir: {run_logger.base_dir}")
         except Exception as e:
             print(f"❌ Failed to initialize RunLogger: {e}")
+            import traceback
+            traceback.print_exc()
             run_logger = None
     else:
-        print("⚠️ RunLogger class not available")
-
-    # ⭐️ 初始化 SessionManager
+        print("⚠️ RunLogger class not available (import failed)")
+        run_logger = None
+    
+    # 初始化 SessionManager
     if SessionManager is not None:
         try:
             api_key = os.getenv("ELEVENLABS_API_KEY", "")
+            print(f"📌 ELEVENLABS_API_KEY: {'[SET]' if api_key else '[NOT SET]'}")
+            
             if not api_key:
-                print("⚠️ ELEVENLABS_API_KEY is empty or not set (SessionManager will still be created, but ElevenLabs will fail until key is set).")
+                print("⚠️ ELEVENLABS_API_KEY is empty")
+            
+            print(f"📌 Creating SessionManager with run_logger={run_logger}")
             session_manager = SessionManager(
                 run_logger=run_logger,
                 api_key=api_key,
             )
-            print("✅ SessionManager initialized:", session_manager)
+            print(f"✅ SessionManager initialized: {session_manager}")
+            print(f"✅ SessionManager type: {type(session_manager)}")
+            print(f"✅ session_manager is not None: {session_manager is not None}")
+            
         except Exception as e:
             print(f"❌ Failed to initialize SessionManager: {e}")
+            import traceback
+            traceback.print_exc()
             session_manager = None
     else:
-        print("⚠️ SessionManager class not available")
-
-    # 下面保留你原来打印路由的代码（可选）
+        print("⚠️ SessionManager class not available (import failed)")
+        session_manager = None
+    
+    # 打印最终状态
+    print(f"\n📊 Final initialization status:")
+    print(f"  - run_logger: {run_logger is not None} ({run_logger})")
+    print(f"  - session_manager: {session_manager is not None} ({session_manager})")
+    
+    if session_manager is None:
+        print("\n🚨 CRITICAL: session_manager is None!")
+        print("🚨 WebSocket connections will fail!")
+        print("🚨 Please check the error messages above for the root cause.")
+    
+    # 打印所有路由
     print("\n📋 Registered Routes:")
     for route in app.routes:
         if hasattr(route, "path"):
@@ -305,14 +232,16 @@ async def startup_event():
     print("🔌 WebSocket:         ws://127.0.0.1:8000/ws/transcribe")
     print("=" * 60 + "\n")
 
-# ========= Shutdown =========
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    print("\n========== 🛑 Shutdown ==========\n")
+    """应用关闭事件"""
+    print("\n" + "=" * 60)
+    print("🛑 Realtime Transcriber API Shutting Down...")
+    print("=" * 60 + "\n")
 
 
-# ========= Main =========
+# ========== Main ==========
 
 if __name__ == "__main__":
     import uvicorn
