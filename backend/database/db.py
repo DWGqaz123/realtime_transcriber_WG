@@ -6,6 +6,8 @@ from database.models import Base, Project, Session
 from typing import Optional, List
 from datetime import datetime
 import os
+from pathlib import Path
+from database.models import Project, Session, Summary  
 
 # 数据库文件路径
 DB_PATH = os.path.expanduser("~/Library/Application Support/RealtimeTranscriber/transcripts.db")
@@ -33,7 +35,32 @@ class DatabaseManager:
         except:
             db.close()
             raise
-    
+    @staticmethod
+    def _init_db():
+        """初始化数据库"""
+        if DatabaseManager._engine is None:
+            db_dir = Path.home() / "Library" / "Application Support" / "RealtimeTranscriber"
+            db_dir.mkdir(parents=True, exist_ok=True)
+            
+            db_path = db_dir / "transcripts.db"
+            database_url = f"sqlite:///{db_path}"
+            
+            DatabaseManager._engine = create_engine(
+                database_url,
+                connect_args={"check_same_thread": False}
+            )
+            
+            DatabaseManager._SessionLocal = sessionmaker(
+                autocommit=False,
+                autoflush=False,
+                bind=DatabaseManager._engine
+            )
+            
+            # 🔧 创建所有表
+            from database.models import Base
+            Base.metadata.create_all(bind=DatabaseManager._engine)
+            
+            print(f"✅ Database initialized at: {db_path}")
     # ========== Project 操作 ==========
     
     @staticmethod
@@ -177,4 +204,147 @@ class DatabaseManager:
         finally:
             db.close()
     
-    
+    # ========== Summary 操作 ==========
+
+    @staticmethod
+    def create_summary(
+        session_id: int,
+        project_id: int,
+        content: str,
+        source_text: str,
+        start_sentence_idx: int,
+        end_sentence_idx: int,
+        duration_seconds: int = 0
+    ) -> Summary:
+        """创建摘要"""
+        db = DatabaseManager.get_db()
+        try:
+            from database.models import Summary
+            from datetime import datetime
+            
+            summary = Summary(
+                session_id=session_id,
+                project_id=project_id,
+                content=content,
+                source_text=source_text,
+                start_sentence_idx=start_sentence_idx,
+                end_sentence_idx=end_sentence_idx,
+                duration_seconds=duration_seconds,
+                created_at=datetime.utcnow(),
+                embedding_status="pending"
+            )
+            
+            db.add(summary)
+            db.commit()
+            db.refresh(summary)
+            
+            print(f"✅ [DB] Created summary: id={summary.id}, session={session_id}")
+            
+            return summary
+            
+        except Exception as e:
+            db.rollback()
+            print(f"❌ [DB] Error creating summary: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+        finally:
+            db.close()
+
+
+    @staticmethod
+    def get_session_summaries(session_id: int) -> List[Summary]:
+        """获取会话的所有摘要"""
+        db = DatabaseManager.get_db()
+        try:
+            from database.models import Summary
+            
+            summaries = db.query(Summary).filter(
+                Summary.session_id == session_id
+            ).order_by(Summary.created_at.asc()).all()
+            
+            return summaries
+            
+        finally:
+            db.close()
+
+
+    @staticmethod
+    def get_project_summaries(project_id: int) -> List[Summary]:
+        """获取项目的所有摘要"""
+        db = DatabaseManager.get_db()
+        try:
+            from database.models import Summary
+            
+            summaries = db.query(Summary).filter(
+                Summary.project_id == project_id
+            ).order_by(Summary.created_at.desc()).all()
+            
+            return summaries
+            
+        finally:
+            db.close()
+
+
+    @staticmethod
+    def get_summary_by_id(summary_id: int) -> Optional[Summary]:
+        """根据 ID 获取摘要"""
+        db = DatabaseManager.get_db()
+        try:
+            from database.models import Summary
+            
+            summary = db.query(Summary).filter(Summary.id == summary_id).first()
+            return summary
+            
+        finally:
+            db.close()
+
+
+    @staticmethod
+    def update_summary_embedding(
+        summary_id: int,
+        embedding_vector: str,
+        status: str = "completed"
+    ) -> bool:
+        """更新摘要的 embedding 信息（预留）"""
+        db = DatabaseManager.get_db()
+        try:
+            from database.models import Summary
+            
+            summary = db.query(Summary).filter(Summary.id == summary_id).first()
+            
+            if not summary:
+                return False
+            
+            summary.embedding_vector = embedding_vector
+            summary.embedding_status = status
+            
+            db.commit()
+            
+            print(f"✅ [DB] Updated embedding for summary {summary_id}")
+            
+            return True
+            
+        except Exception as e:
+            db.rollback()
+            print(f"❌ [DB] Error updating embedding: {e}")
+            raise
+        finally:
+            db.close()
+
+
+    @staticmethod
+    def get_pending_embeddings(limit: int = 100) -> List[Summary]:
+        """获取待向量化的摘要（预留）"""
+        db = DatabaseManager.get_db()
+        try:
+            from database.models import Summary
+            
+            summaries = db.query(Summary).filter(
+                Summary.embedding_status == "pending"
+            ).limit(limit).all()
+            
+            return summaries
+            
+        finally:
+            db.close()

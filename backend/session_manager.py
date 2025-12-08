@@ -9,6 +9,9 @@ from run_logger import RunLogger
 from elevenlabs_client import ElevenLabsRealtimeClient, ElevenLabsConfig
 import os
 import time
+from summary_service import get_summary_service
+from database.db import DatabaseManager
+from datetime import datetime
 
 @dataclass
 class Session:
@@ -23,9 +26,15 @@ class Session:
     manual_commit_task: Optional[asyncio.Task] = None
     last_audio_time: float = 0.0
     
-        # session ID in the database
+    # session ID in the database
     db_session_id: Optional[int] = None
     is_saved: bool = False
+    
+    last_summary_time: float = field(default_factory=lambda: time.time())
+    summary_buffer: List[str] = field(default_factory=list)  # 待摘要的句子
+    last_context: str = ""  # 上一次摘要的末尾（用于上下文）
+    summary_sentence_start_idx: int = 0  # 当前 buffer 起始句子索引
+    generated_summaries: List[int] = field(default_factory=list)  # 已生成的摘要 ID 列表
     
     # statistics
     start_time: float = field(default_factory=lambda: time.time())
@@ -170,8 +179,141 @@ class SessionManager:
         # Remove session from dictionary
         del self.sessions[session_id]
         print(f"[SessionManager] Session {session_id} fully cleaned up")
-        
     
+    def _should_generate_summary(self, session: Session) -> bool:
+        """
+        检查是否应该生成摘要
+        
+        条件：
+        1. 距离上次摘要已超过配置的时间间隔
+        2. 累积了足够数量的句子
+        3. 会话仍然活跃
+        4. 有关联的数据库会话ID
+        """
+        # 读取配置
+        interval = int(os.getenv("SUMMARY_INTERVAL_SECONDS", "300"))  # 默认5分钟
+        min_sentences = int(os.getenv("SUMMARY_MIN_SENTENCES", "5"))  # 默认5句
+        
+        now = time.time()
+        elapsed = now - session.last_summary_time
+        
+        should_generate = (
+            elapsed >= interval
+            and len(session.summary_buffer) >= min_sentences
+            and session.is_active
+            and session.db_session_id is not None
+        )
+        
+        if should_generate:
+            print(f"\n{'='*60}")
+            print(f"⏰ Summary trigger conditions met for session {session.id}")
+            print(f"   Elapsed time: {elapsed:.1f}s (threshold: {interval}s)")
+            print(f"   Buffer size: {len(session.summary_buffer)} sentences (threshold: {min_sentences})")
+            print(f"{'='*60}\n")
+        
+        return should_generate
+    
+    async def _generate_and_send_summary(self, session: Session):
+        """
+        生成摘要并发送给前端
+        
+        步骤：
+        1. 合并 buffer 中的文本
+        2. 调用 LLM 生成摘要
+        3. 保存到数据库
+        4. 通过 WebSocket 发送给前端
+        5. 更新 session 状态
+        """
+        try:
+            print(f"\n🤖 Starting summary generation for session {session.id}")
+            
+            # 1. 准备文本
+            buffer_text = "\n".join(session.summary_buffer)
+            
+            print(f"📝 Buffer text length: {len(buffer_text)} chars")
+            print(f"📝 Context length: {len(session.last_context)} chars")
+            
+            # 2. 生成摘要
+            service = get_summary_service()
+            mode = session.meta.get("mode", "lecture")
+            
+            summary_content = await service.generate_summary(
+                buffer_text=buffer_text,
+                context=session.last_context,
+                mode=mode
+            )
+            
+            if not summary_content:
+                print(f"❌ Failed to generate summary")
+                return
+            
+            print(f"✅ Summary generated: {len(summary_content)} chars")
+            
+            # 3. 保存到数据库
+            project_id = session.meta.get("project_id")
+            
+            if project_id and session.db_session_id:
+                try:
+                    duration = int(time.time() - session.last_summary_time)
+                    
+                    summary = DatabaseManager.create_summary(
+                        session_id=session.db_session_id,
+                        project_id=project_id,
+                        content=summary_content,
+                        source_text=buffer_text,
+                        start_sentence_idx=session.summary_sentence_start_idx,
+                        end_sentence_idx=len(session.transcript_parts) - 1,
+                        duration_seconds=duration
+                    )
+                    
+                    # 记录已生成的摘要 ID
+                    session.generated_summaries.append(summary.id)
+                    
+                    print(f"💾 Saved summary to DB: id={summary.id}")
+                    
+                except Exception as e:
+                    print(f"❌ Error saving summary to DB: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # 4. 发送给前端
+            try:
+                import json
+                
+                message = json.dumps({
+                    "content": summary_content,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "sentence_count": len(session.summary_buffer),
+                    "duration": int(time.time() - session.last_summary_time)
+                })
+                
+                await session.websocket.send_text(f"[summary] {message}")
+                
+                print(f"📤 Sent summary to client")
+                
+            except Exception as e:
+                print(f"❌ Error sending summary to client: {e}")
+            
+            # 5. 更新 session 状态
+            # 保留最后2句作为下次的上下文
+            session.last_context = "\n".join(session.summary_buffer[-2:])
+            
+            # 更新起始句子索引
+            session.summary_sentence_start_idx = len(session.transcript_parts)
+            
+            # 清空 buffer
+            session.summary_buffer.clear()
+            
+            # 更新时间
+            session.last_summary_time = time.time()
+            
+            print(f"✅ Summary generation completed\n")
+            
+        except Exception as e:
+            print(f"❌ Error in _generate_and_send_summary: {e}")
+            import traceback
+            traceback.print_exc()
+        
     async def _save_session_to_db(self, session_id: str) -> None:
         """
         save the current session's transcript to the database.
@@ -624,6 +766,10 @@ class SessionManager:
         if is_final and text.strip():
             session.transcript_parts.append(text.strip())
             print(f"[SessionManager] 📝 Recorded final transcript: {len(text)} chars")
+            session.summary_buffer.append(text.strip())  # 🆕
+            # 🆕 检查是否需要生成摘要
+            if self._should_generate_summary(session):
+                asyncio.create_task(self._generate_and_send_summary(session))
 
         try:
             await session.websocket.send_text(message)
@@ -695,3 +841,6 @@ class SessionManager:
             raise
         except Exception as exc:
             print(f"[SessionManager] Unexpected error in manual commit loop: {exc}")
+            
+    
+   

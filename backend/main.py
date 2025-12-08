@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+
 load_dotenv()
 
 # ======= Import DatabaseManager =======
@@ -207,6 +208,13 @@ async def startup_event():
         print("⚠️ SessionManager class not available (import failed)")
         session_manager = None
     
+    try:
+        from summary_service import get_summary_service
+        summary_service = get_summary_service()
+        print(f"✅ SummaryService initialized (API key: {bool(summary_service.api_key)})")
+    except Exception as e:
+        print(f"⚠️ Failed to initialize SummaryService: {e}")
+        
     # 打印最终状态
     print(f"\n📊 Final initialization status:")
     print(f"  - run_logger: {run_logger is not None} ({run_logger})")

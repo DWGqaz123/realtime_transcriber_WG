@@ -19,6 +19,7 @@ class Project(Base):
     
     # 关系：一个项目有多个会话
     sessions = relationship("Session", back_populates="project", cascade="all, delete-orphan")
+    summaries = relationship("Summary", back_populates="project", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Project(id={self.id}, name='{self.name}')>"
@@ -44,6 +45,39 @@ class Session(Base):
     
     # 关系：属于某个项目
     project = relationship("Project", back_populates="sessions")
+    summaries = relationship("Summary", back_populates="session", cascade="all, delete-orphan") 
+     
     
     def __repr__(self):
         return f"<Session(id={self.id}, project_id={self.project_id}, mode='{self.mode}')>"
+
+class Summary(Base):
+    """摘要表 - 存储 AI 生成的智能摘要"""
+    __tablename__ = "summaries"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)  # 🔧 关联项目
+    
+    # 摘要内容
+    content = Column(Text, nullable=False)  # Markdown 格式的摘要
+    source_text = Column(Text)  # 原始文本片段
+    
+    # 位置信息
+    start_sentence_idx = Column(Integer)  # 从第几句开始
+    end_sentence_idx = Column(Integer)    # 到第几句结束
+    
+    # 时间信息
+    created_at = Column(DateTime, default=datetime.utcnow)
+    duration_seconds = Column(Integer)  # 这段摘要覆盖的时长
+    
+    # 🔧 向量化相关（预留）
+    embedding_status = Column(String(50), default="pending")  # pending, processing, completed, failed
+    embedding_vector = Column(Text, nullable=True)  # JSON 格式存储向量（或使用专门的向量数据库）
+    
+    # 关系
+    session = relationship("Session", back_populates="summaries")
+    project = relationship("Project", back_populates="summaries")
+    
+    def __repr__(self):
+        return f"<Summary(id={self.id}, session_id={self.session_id}, created_at={self.created_at})>"
