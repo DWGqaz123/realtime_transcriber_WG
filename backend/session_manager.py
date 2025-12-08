@@ -302,8 +302,8 @@ class SessionManager:
             from datetime import datetime
             
             # Base directory            
-            current_dir = Path(__file__).parent
-            base_dir = current_dir / "transcripts"
+            base_dir = Path.home() / "Library" / "Application Support" / "RealtimeTranscriber" / "transcripts"
+
 
             safe_project_name = "".join(c for c in project_name if c.isalnum() or c in (' ', '-', '_')).strip()
             project_dir = base_dir / safe_project_name

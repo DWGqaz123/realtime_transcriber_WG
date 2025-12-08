@@ -49,13 +49,58 @@ class SessionResponse(BaseModel):
 @router.post("/", response_model=ProjectResponse)
 async def create_project(project: ProjectCreate):
     """创建新项目"""
+    print(f"\n{'='*60}")
+    print(f"📝 Received create project request")
+    print(f"   Name: '{project.name}'")
+    print(f"   Description: '{project.description}'")
+    print(f"{'='*60}\n")
+    
     try:
+        # 测试数据库连接
+        print("🔍 Testing database connection...")
+        if DatabaseManager is None:
+            print("❌ DatabaseManager is None!")
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        print("✅ DatabaseManager available")
+        
+        # 创建项目
+        print(f"📝 Calling DatabaseManager.create_project...")
         db_project = DatabaseManager.create_project(
             name=project.name,
             description=project.description or ""
         )
-        return ProjectResponse.model_validate(db_project, from_attributes=True)
+        
+        print(f"✅ Database returned project: {db_project}")
+        print(f"   ID: {db_project.id}")
+        print(f"   Name: {db_project.name}")
+        print(f"   Sessions count: {len(db_project.sessions) if hasattr(db_project, 'sessions') else 'N/A'}")
+        
+        # 验证响应
+        print(f"📦 Creating response model...")
+        result = ProjectResponse(
+            id=db_project.id,
+            name=db_project.name,
+            description=db_project.description,
+            created_at=db_project.created_at,
+            updated_at=db_project.updated_at,
+            session_count=len(db_project.sessions))
+        
+        print(f"✅ Response created successfully")
+        print(f"{'='*60}\n")
+        
+        return result
+        
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"\n{'='*60}")
+        print(f"❌ ERROR in create_project:")
+        print(f"   Exception type: {type(e).__name__}")
+        print(f"   Exception message: {str(e)}")
+        print(f"{'='*60}\n")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -196,8 +241,8 @@ async def export_session_file(project_id: int, session_id: int):
         
         # 构建文件路径
         import os
-        current_dir = Path(__file__).parent.parent  # 回到 backend/
-        base_dir = current_dir / "transcripts"
+        base_dir = Path.home() / "Library" / "Application Support" / "RealtimeTranscriber" / "transcripts"
+
         
         safe_project_name = "".join(
             c for c in project.name 

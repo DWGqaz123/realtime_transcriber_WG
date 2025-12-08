@@ -124,7 +124,10 @@ class ProjectService {
     // MARK: - Create project
     
     func createProject(name: String, description: String = "") async throws -> Project {
-        guard let url = URL(string: baseURL) else {
+        let urlString = "\(baseURL)/"  
+        print("📤 Creating project at URL: \(urlString)")
+        
+        guard let url = URL(string: urlString) else {
             throw ProjectServiceError.invalidURL
         }
         

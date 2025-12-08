@@ -44,30 +44,21 @@ Manual Mode (commit every 35 seconds)
 
     ---
 
-    ## 🎨 文件格式示例
 
-    ### 保存的文件内容：
-    ```
-    Project: CMU test project
-    Mode: lecture
-    Date: 2025-12-01 14:30:15
-    ============================================================
+    # 数据存储位置
 
-    Hello, this is a test of the realtime transcription system.
-    Today we will discuss the fundamentals of machine learning.
-    The key concepts include supervised learning, unsupervised learning, and reinforcement learning.
-    ```
+所有用户数据存储在：
+```
+~/Library/Application Support/RealtimeTranscriber/
+├── transcripts.db                   # 数据库
+└── transcripts/                     # 转录文件
+    └── {项目名}/
+        └── {时间戳}_{模式}.txt
+```
 
-    ---
+## 卸载
 
-    ## 📂 目录结构
-    ```
-    ~/Documents/RealtimeTranscriber/
-    ├── CMU test project/
-    │   ├── 2025-12-01_14-30-15_lecture.txt      (320 bytes)
-    │   ├── 2025-12-01_15-45-22_discussion.txt   (456 bytes)
-    │   └── 2025-12-01_16-20-10_lecture.txt      (892 bytes)
-    │
-    └── Test Project/
-        ├── 2025-12-01_17-05-33_lecture.txt      (234 bytes)
-        └── 2025-12-01_18-12-44_discussion.txt   (567 bytes)
+如需完全删除应用数据：
+```bash
+rm -rf ~/Library/Application\ Support/RealtimeTranscriber/
+```
