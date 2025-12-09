@@ -16,17 +16,27 @@ struct ContentView: View {
         NavigationSplitView {
             ProjectSidebarView(viewModel: projectViewModel)
         } detail: {
-            RecordingView(
-                viewModel: viewModel,
-                projectViewModel: projectViewModel
-            )
-            // 🔧 使用新版 onChange API
-            .onChange(of: projectViewModel.selectedProject) { oldValue, newValue in
-                viewModel.currentProjectId = newValue?.id
-                print("📁 Project changed: \(newValue?.name ?? "none")")
-            }
-            .onAppear {
-                viewModel.currentProjectId = projectViewModel.selectedProject?.id
+            // 使用 HSplitView 实现双列布局
+            HSplitView {
+                // 左侧：录音和转录区域
+                RecordingView(
+                    viewModel: viewModel,
+                    projectViewModel: projectViewModel
+                )
+                .frame(minWidth: 400, idealWidth: 600)
+                .task(id: projectViewModel.selectedProject?.id) {
+                    if let project = projectViewModel.selectedProject {
+                        viewModel.currentProjectId = project.id
+                        print("📁 Project changed: \(project.name)")
+                    }
+                }
+                .onAppear {
+                    viewModel.currentProjectId = projectViewModel.selectedProject?.id
+                }
+                
+                // 右侧：智能笔记流
+                SummaryPanelView(viewModel: viewModel)
+                    .frame(minWidth: 300, idealWidth: 350, maxWidth: 450)
             }
         }
         .navigationSplitViewStyle(.balanced)
@@ -168,8 +178,21 @@ struct RecordingView: View {
                         Text(viewModel.formattedDuration)
                             .font(.system(.body, design: .monospaced))
                             .foregroundColor(.secondary)
+                        if !viewModel.summaries.isEmpty {
+                            Text("•")
+                                .foregroundColor(.secondary)
+                            
+                            HStack(spacing: 4) {
+                                Image(systemName: "sparkles")
+                                    .foregroundColor(.orange)
+                                Text("\(viewModel.summaries.count)")
+                                    .foregroundColor(.orange)
+                            }
+                            .font(.caption)
+                        }
                     }
-                } else {
+                    .font(.caption)
+                }else {
                     if projectViewModel.selectedProject != nil {
                         Text("Ready to record")
                             .foregroundColor(.secondary)

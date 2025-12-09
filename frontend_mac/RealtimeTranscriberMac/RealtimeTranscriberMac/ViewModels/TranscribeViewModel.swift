@@ -50,6 +50,8 @@ final class TranscribeViewModel: ObservableObject {
     @Published var sentChunks: Int = 0
     @Published var skippedChunks: Int = 0
     @Published var trafficSavedPercent: Int = 0
+    // 摘要列表
+    @Published var summaries: [Summary] = []
     
     // MARK: - Private Properties
     
@@ -57,6 +59,7 @@ final class TranscribeViewModel: ObservableObject {
     private let audioCapture = AudioCaptureService()
     private var recordingTimer: Timer?
     private var recordingStartTime: Date?  // 🔧 添加录音开始时间
+ 
     
     // MARK: - Initialization
     
@@ -144,6 +147,8 @@ final class TranscribeViewModel: ObservableObject {
                     self.showPermissionAlert = true
                     return
                 }
+                //remore all possible remains summary
+                self.summaries.removeAll()
                 
                 // 🔧 检查项目 ID
                 guard let projectId = self.currentProjectId else {
@@ -218,7 +223,21 @@ final class TranscribeViewModel: ObservableObject {
     func stopRecording() {
         guard isRecording else { return }
         
+        // 🔧 在停止前，将 currentSubtitle 添加到 fullTranscript
+        if !currentSubtitle.isEmpty {
+            print("📝 Committing current subtitle to transcript before stop")
+            print("   Current subtitle: \(currentSubtitle)")
+            
+            if !fullTranscript.isEmpty {
+                fullTranscript += "\n"
+            }
+            fullTranscript += currentSubtitle
+            
+            print("✅ Committed, clearing currentSubtitle")
+        }
+        
         isRecording = false
+        currentSubtitle = ""  // 清空字幕
         permissionStatus = "Recording stopped - Ready to save 💾"
         
         // 停止计时器
@@ -295,12 +314,92 @@ final class TranscribeViewModel: ObservableObject {
                 // clear
                 self.client.disconnect()
                 self.fullTranscript = ""
+                self.summaries.removeAll()
                 self.permissionStatus = "Ready to record 🎤"
                 
             } else if content.contains("ERROR") {
                 self.currentSubtitle = "❌ \(content)"
             } else if content.contains("already saved") {
                 self.currentSubtitle = "⚠️ Session already saved"
+                self.summaries.removeAll()
+            }
+            
+        } else if text.hasPrefix("[summary]") {
+            // 🔧 新增：处理摘要消息
+            let jsonString = text.replacingOccurrences(of: "[summary] ", with: "")
+            print("📝 Received summary: \(jsonString.prefix(100))...")
+            do {
+                let jsonData = jsonString.data(using: .utf8)!
+                let decoder = JSONDecoder()
+                
+                // 🔧 修改：使用自定义日期解码策略
+                // 🔧 自定义日期解码策略
+                decoder.dateDecodingStrategy = .custom { decoder in
+                    let container = try decoder.singleValueContainer()
+                    let dateString = try container.decode(String.self)
+                    
+                    // 尝试多种格式
+                    // 格式 1: 2025-12-08T23:19:23.703617
+                    let formatter1 = DateFormatter()
+                    formatter1.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+                    formatter1.locale = Locale(identifier: "en_US_POSIX")
+                    formatter1.timeZone = TimeZone(secondsFromGMT: 0)
+                    
+                    if let date = formatter1.date(from: dateString) {
+                        return date
+                    }
+                    
+                    // 格式 2: 2025-12-08T23:19:23
+                    let formatter2 = DateFormatter()
+                    formatter2.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+                    formatter2.locale = Locale(identifier: "en_US_POSIX")
+                    formatter2.timeZone = TimeZone(secondsFromGMT: 0)
+                    
+                    if let date = formatter2.date(from: dateString) {
+                        return date
+                    }
+                    
+                    // 格式 3: 标准 ISO8601
+                    let iso8601Formatter = ISO8601DateFormatter()
+                    if let date = iso8601Formatter.date(from: dateString) {
+                        return date
+                    }
+                    
+                    throw DecodingError.dataCorruptedError(
+                        in: container,
+                        debugDescription: "Cannot decode date: \(dateString)"
+                    )
+                }
+                
+                let summary = try decoder.decode(Summary.self, from: jsonData)
+                
+                // 添加到列表
+                self.summaries.insert(summary, at: 0)
+                
+                print("✅ Summary added successfully!")
+                print("   ID: \(summary.id)")
+                print("   Content length: \(summary.content.count) chars")
+                print("   Total summaries: \(self.summaries.count)")
+                
+                // 显示提示
+                self.currentSubtitle = "✨ New summary generated"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    if self.currentSubtitle == "✨ New summary generated" {
+                        self.currentSubtitle = ""
+                    }
+                }
+                
+            } catch DecodingError.dataCorrupted(let context) {
+                print("❌ Decoding error - data corrupted:")
+                print("   \(context.debugDescription)")
+                print("   JSON: \(jsonString)")
+            } catch DecodingError.keyNotFound(let key, let context) {
+                print("❌ Decoding error - key not found:")
+                print("   Key: \(key)")
+                print("   \(context.debugDescription)")
+            } catch {
+                print("❌ Failed to decode summary: \(error)")
+                print("   JSON: \(jsonString)")
             }
             
         } else {
@@ -308,7 +407,27 @@ final class TranscribeViewModel: ObservableObject {
         }
     }
     
-
+    func clearSummaries() {
+        summaries.removeAll()
+        print("🗑️ Summaries cleared")
+    }
+    // 🔧 添加辅助方法（在类外部或作为扩展）
+    private func parseCustomISO8601(_ dateString: String) -> Date? {
+        // 格式: 2025-12-08T23:19:23.703617
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        
+        if let date = formatter.date(from: dateString) {
+            return date
+        }
+        
+        // 尝试不带微秒的格式
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return formatter.date(from: dateString)
+    }
+    
     // MARK: - Computed Properties
     
     var formattedDuration: String {

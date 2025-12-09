@@ -264,6 +264,76 @@ class ProjectService {
         }
     }
     
+    // MARK: - Delete session
+
+    /// Delete a session
+    func deleteSession(projectId: Int, sessionId: Int) async throws {
+        guard let url = URL(string: "\(baseURL)/\(projectId)/sessions/\(sessionId)") else {
+            throw ProjectServiceError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        
+        print("🗑️ DELETE \(url.absoluteString)")
+        
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw ProjectServiceError.unknown
+            }
+            
+            print("📥 Delete session response: \(httpResponse.statusCode)")
+            
+            guard (200...299).contains(httpResponse.statusCode) else {
+                throw ProjectServiceError.serverError(statusCode: httpResponse.statusCode)
+            }
+            
+            print("✅ Successfully deleted session \(sessionId)")
+            
+        } catch let error as ProjectServiceError {
+            throw error
+        } catch {
+            throw ProjectServiceError.networkError(error)
+        }
+    }
+    
+    // MARK: - Delete summary
+
+    /// Delete a summary
+    func deleteSummary(projectId: Int, sessionId: Int, summaryId: Int) async throws {
+        guard let url = URL(string: "\(baseURL)/\(projectId)/sessions/\(sessionId)/summaries/\(summaryId)") else {
+            throw ProjectServiceError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        
+        print("🗑️ DELETE \(url.absoluteString)")
+        
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw ProjectServiceError.unknown
+            }
+            
+            print("📥 Delete summary response: \(httpResponse.statusCode)")
+            
+            guard (200...299).contains(httpResponse.statusCode) else {
+                throw ProjectServiceError.serverError(statusCode: httpResponse.statusCode)
+            }
+            
+            print("✅ Successfully deleted summary \(summaryId)")
+            
+        } catch let error as ProjectServiceError {
+            throw error
+        } catch {
+            throw ProjectServiceError.networkError(error)
+        }
+    }
+    
     // MARK: - Get single project
     
     func getProject(id: Int) async throws -> Project {

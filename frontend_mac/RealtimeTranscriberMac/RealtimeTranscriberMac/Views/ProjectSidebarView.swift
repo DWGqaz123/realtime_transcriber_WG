@@ -11,7 +11,9 @@ struct ProjectSidebarView: View {
     @ObservedObject var viewModel: ProjectListViewModel
     @State private var showCreateSheet = false
     @State private var showDeleteConfirmation = false
-    @State private var projectToDelete: Project?
+    @State private var showDeleteSessionConfirmation = false
+    @State private var sessionToDelete: (projectId: Int, session: RecordingSession)? = nil
+    @State private var projectToDelete: Project? = nil
     
     var body: some View {
         VStack(spacing: 0) {
@@ -68,6 +70,10 @@ struct ProjectSidebarView: View {
                                 onSelectSession: { session in
                                     viewModel.selectSession(projectId: project.id, session: session)
                                 },
+                                onDeleteSession: { session in  // 🔧 新增
+                                    sessionToDelete = (projectId: project.id, session: session)
+                                    showDeleteSessionConfirmation = true
+                                },
                                 onDelete: {
                                     projectToDelete = project
                                     showDeleteConfirmation = true
@@ -84,14 +90,55 @@ struct ProjectSidebarView: View {
             footerView
         }
         .frame(minWidth: 250, idealWidth: 300, maxWidth: 350)
-        .sheet(isPresented: $showCreateSheet) {
-            CreateProjectSheet { name, description in
-                await viewModel.createProject(name: name, description: description)
-            }
-        }
         .sheet(isPresented: $viewModel.showSessionDetail) {
             if let session = viewModel.selectedSession {
-                SessionDetailSheet(session: session)
+                // 🔧 在闭包外部捕获 IDs
+                let sessionId = session.id
+                let projectId = viewModel.selectedProject?.id
+                
+                SessionDetailSheet(
+                    session: session,
+                    isPresented: $viewModel.showSessionDetail,
+                    onDeleteSession: {
+                        print("🔵 onDeleteSession callback in sheet")
+                        print("   Captured sessionId: \(sessionId)")
+                        print("   Captured projectId: \(String(describing: projectId))")
+                        
+                        if let pid = projectId {
+                            Task {
+                                await viewModel.deleteSession(
+                                    projectId: pid,
+                                    sessionId: sessionId
+                                )
+                            }
+                        } else {
+                            print("⚠️ No project ID captured")
+                        }
+                    },
+                    onDeleteSummary: { summaryId in
+                        print("🔵 onDeleteSummary callback in sheet")
+                        print("   Captured sessionId: \(sessionId)")
+                        print("   Captured projectId: \(String(describing: projectId))")
+                        print("   SummaryId: \(summaryId)")
+                        
+                        if let pid = projectId {
+                            Task {
+                                await viewModel.deleteSummary(
+                                    projectId: pid,
+                                    sessionId: sessionId,
+                                    summaryId: summaryId
+                                )
+                            }
+                        } else {
+                            print("⚠️ No project ID captured")
+                        }
+                    }
+                )
+            } else {
+                Text("No session selected")
+                    .onAppear {
+                        print("⚠️ Sheet opened but no session selected")
+                    }
             }
         }
         .alert("Delete Project", isPresented: $showDeleteConfirmation) {
@@ -116,6 +163,26 @@ struct ProjectSidebarView: View {
         } message: {
             if let error = viewModel.errorMessage {
                 Text(error)
+            }
+        }
+        .alert("Delete Session", isPresented: $showDeleteSessionConfirmation) {
+            Button("Cancel", role: .cancel) {
+                sessionToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let toDelete = sessionToDelete {
+                    Task {
+                        await viewModel.deleteSession(
+                            projectId: toDelete.projectId,
+                            sessionId: toDelete.session.id
+                        )
+                    }
+                }
+                sessionToDelete = nil
+            }
+        } message: {
+            if let toDelete = sessionToDelete {
+                Text("Are you sure you want to delete this session? This will delete the transcript and all \(toDelete.session.summaries?.count ?? 0) summaries. This cannot be undone.")
             }
         }
     }
@@ -194,6 +261,7 @@ struct ProjectRowExpandable: View {
     let onSelectProject: () -> Void
     let onToggleExpand: () -> Void
     let onSelectSession: (RecordingSession) -> Void
+    let onDeleteSession: (RecordingSession) -> Void
     let onDelete: () -> Void
     
     @State private var isHovering = false
@@ -257,17 +325,19 @@ struct ProjectRowExpandable: View {
             }
             
             // Sessions list (when expanded)
-            if isExpanded {
-                VStack(spacing: 0) {
-                    ForEach(sessions) { session in
-                        SessionRowView(
-                            session: session,
-                            isSelected: selectedSessionId == session.id,
-                            onSelect: {
-                                onSelectSession(session)
-                            }
-                        )
-                    }
+            // Session rows (when expanded)
+            if isExpanded && !sessions.isEmpty {
+                ForEach(sessions) { session in
+                    SessionRowView(
+                        session: session,
+                        isSelected: selectedSessionId == session.id,
+                        onSelect: {
+                            onSelectSession(session)
+                        },
+                        onDelete: {  // 🔧 新增
+                            onDeleteSession(session)
+                        }
+                    )
                     
                     if sessions.isEmpty {
                         Text("No sessions yet")
@@ -289,6 +359,7 @@ struct SessionRowView: View {
     let session: RecordingSession
     let isSelected: Bool
     let onSelect: () -> Void
+    let onDelete: () -> Void
     
     @State private var isHovering = false
     
@@ -317,6 +388,15 @@ struct SessionRowView: View {
             }
             
             Spacer()
+            if isHovering {
+                            Button(action: onDelete) {
+                                Image(systemName: "trash")
+                                    .foregroundColor(.red)
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Delete session")
+                        }
             
             // Sentence count
             Text("\(session.sentenceCount)")

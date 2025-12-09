@@ -227,6 +227,100 @@ class ProjectListViewModel: ObservableObject {
         selectedSession = nil
     }
     
+    /// Delete a session
+    func deleteSession(projectId: Int, sessionId: Int) async {
+        do {
+            print("🗑️ Deleting session \(sessionId) from project \(projectId)")
+            
+            // 先检查 session 是否在缓存中
+            if let sessions = projectSessions[projectId] {
+                let exists = sessions.contains { $0.id == sessionId }
+                print("   Session exists in cache: \(exists)")
+            }
+            
+            try await projectService.deleteSession(projectId: projectId, sessionId: sessionId)
+            
+            print("✅ Backend confirmed deletion")
+            
+            // 从缓存中移除
+            if var sessions = projectSessions[projectId] {
+                let beforeCount = sessions.count
+                sessions.removeAll { $0.id == sessionId }
+                projectSessions[projectId] = sessions
+                print("   Removed from cache: \(beforeCount) → \(sessions.count)")
+            }
+            
+            // 关闭详情窗口（如果正在显示被删除的 session）
+            if selectedSession?.id == sessionId {
+                closeSessionDetail()
+                print("   Closed session detail sheet")
+            }
+            
+            // 刷新项目信息（更新 session 计数）
+            if let project = projects.first(where: { $0.id == projectId }) {
+                let updated = try await projectService.getProject(id: projectId)
+                if let index = projects.firstIndex(where: { $0.id == projectId }) {
+                    projects[index] = updated
+                    
+                    // 如果是当前选中的项目，更新选中状态
+                    if selectedProject?.id == projectId {
+                        selectedProject = updated
+                    }
+                }
+                print("   Updated project: sessions = \(updated.sessionCount)")
+            }
+            
+            print("✅ Session deleted successfully")
+            
+        } catch ProjectServiceError.serverError(let statusCode) where statusCode == 404 {
+            print("⚠️ Session \(sessionId) not found (404)")
+            
+            // 即使 404，也从前端缓存中移除
+            if var sessions = projectSessions[projectId] {
+                sessions.removeAll { $0.id == sessionId }
+                projectSessions[projectId] = sessions
+            }
+            
+            // 关闭详情窗口
+            if selectedSession?.id == sessionId {
+                closeSessionDetail()
+            }
+            
+            errorMessage = "Session not found. It may have been deleted already."
+            showError = true
+            
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+            print("❌ Failed to delete session: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Delete a summary
+    func deleteSummary(projectId: Int, sessionId: Int, summaryId: Int) async {
+        do {
+            print("🗑️ Deleting summary \(summaryId) from session \(sessionId)")
+            
+            try await projectService.deleteSummary(
+                projectId: projectId,
+                sessionId: sessionId,
+                summaryId: summaryId
+            )
+            
+            print("✅ Summary deleted successfully")
+            
+            // 如果当前显示的 session 就是被修改的，重新加载详情
+            if selectedSession?.id == sessionId {
+                await loadSessionDetail(projectId: projectId, sessionId: sessionId)
+            }
+            
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+            print("❌ Failed to delete summary: \(error.localizedDescription)")
+        }
+    }
+    
     
     /// Refresh current project data
     func refreshSelectedProject() async {

@@ -331,8 +331,75 @@ class DatabaseManager:
             raise
         finally:
             db.close()
-
-
+    
+    @staticmethod
+    def delete_session(session_id: int) -> bool:
+        """
+        删除 session（级联删除 summaries）
+        
+        Note: summaries 会通过数据库外键的 CASCADE 自动删除
+        """
+        db = DatabaseManager.get_db()
+        try:
+            from database.models import Session
+            
+            session = db.query(Session).filter(Session.id == session_id).first()
+            
+            if not session:
+                print(f"⚠️ [DB] Session {session_id} not found")
+                return False
+            
+            # 获取 summaries 数量（用于日志）
+            summaries_count = len(session.summaries) if hasattr(session, 'summaries') else 0
+            
+            # 删除 session（会级联删除 summaries）
+            db.delete(session)
+            db.commit()
+            
+            print(f"✅ [DB] Deleted session {session_id}")
+            print(f"   Cascaded deletion of {summaries_count} summaries")
+            
+            return True
+        
+        except Exception as e:
+            db.rollback()
+            print(f"❌ [DB] Error deleting session: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+        finally:
+            db.close()
+            
+    
+    @staticmethod
+    def delete_summary(summary_id: int) -> bool:
+        """删除摘要"""
+        db = DatabaseManager.get_db()
+        try:
+            from database.models import Summary
+            
+            summary = db.query(Summary).filter(Summary.id == summary_id).first()
+            
+            if not summary:
+                print(f"⚠️ [DB] Summary {summary_id} not found")
+                return False
+            
+            db.delete(summary)
+            db.commit()
+            
+            print(f"✅ [DB] Deleted summary {summary_id}")
+            
+            return True
+            
+        except Exception as e:
+            db.rollback()
+            print(f"❌ [DB] Error deleting summary: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+        finally:
+            db.close()
+    
     @staticmethod
     def get_pending_embeddings(limit: int = 100) -> List[Summary]:
         """获取待向量化的摘要（预留）"""

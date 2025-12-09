@@ -2,208 +2,563 @@
 //  SessionDetailSheet.swift
 //  RealtimeTranscriberMac
 //
-//  Created by 董文光 on 2025/12/7.
-//
-//  浮窗展示 Session 详情
+//  Session 详情浮窗 - 包含转录和摘要（带删除功能）
 //
 
 import SwiftUI
-import UniformTypeIdentifiers 
+import UniformTypeIdentifiers
 
 struct SessionDetailSheet: View {
     let session: RecordingSession
-    @Environment(\.dismiss) var dismiss
+    @Binding var isPresented: Bool
+    
+    @State private var selectedTab: Tab = .transcript
+    @State private var showDeleteSessionConfirmation = false
+    @State private var showDeleteSummaryConfirmation = false
+    @State private var summaryToDelete: SessionSummary? = nil
+    @State private var localSummaries: [SessionSummary]  // 本地副本，用于删除后更新
+    
+    // 从外部传入的删除回调
+    var onDeleteSession: (() -> Void)? = nil
+    var onDeleteSummary: ((Int) -> Void)? = nil
+    
+    init(session: RecordingSession, isPresented: Binding<Bool>, onDeleteSession: (() -> Void)? = nil, onDeleteSummary: ((Int) -> Void)? = nil) {
+        self.session = session
+        self._isPresented = isPresented
+        self.onDeleteSession = onDeleteSession
+        self.onDeleteSummary = onDeleteSummary
+        self._localSummaries = State(initialValue: session.summaries ?? [])
+    }
+    
+    enum Tab {
+        case transcript
+        case summaries
+    }
     
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Session Transcript")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    
-                    HStack(spacing: 16) {
-                        Label(session.modeDisplayName, systemImage: session.mode == "lecture" ? "book.fill" : "bubble.left.and.bubble.right.fill")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        Label(session.formattedDuration, systemImage: "clock.fill")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        Label(session.formattedStartDate, systemImage: "calendar")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                Spacer()
-                
-                Button(action: {
-                    dismiss()
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
-                        .font(.title2)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(24)
+            headerView
             
             Divider()
             
+            // Tab selector
+            tabSelectorView
+            
+            Divider()
+            
+            // Content
+            contentView
+        }
+        .frame(width: 700, height: 600)
+        .alert("Delete Session", isPresented: $showDeleteSessionConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    print("❌ Delete session cancelled")
+                }
+                Button("Delete", role: .destructive) {
+                    print("🗑️ Delete session confirmed in alert")
+                    deleteSessionConfirmed()
+                }
+            } message: {
+                Text("Are you sure you want to delete this entire session? This will delete the transcript and all \(localSummaries.count) summaries. This cannot be undone.")
+            }
+            .alert("Delete Summary", isPresented: $showDeleteSummaryConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    summaryToDelete = nil
+                    print("❌ Delete summary cancelled")
+                }
+                Button("Delete", role: .destructive) {
+                    print("🗑️ Delete summary confirmed in alert")
+                    deleteSummaryConfirmed()
+                }
+            } message: {
+                Text("Are you sure you want to delete this summary? This cannot be undone.")
+            }
+    }
+    
+    // MARK: - Header
+    
+    private var headerView: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Session Details")
+                    .font(.headline)
+                
+                HStack(spacing: 12) {
+                    Label(session.modeDisplayName, systemImage: session.mode == "lecture" ? "book.fill" : "bubble.left.and.bubble.right.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Label(session.formattedDuration, systemImage: "clock")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Label(session.formattedStartDate, systemImage: "calendar")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            // 🔧 新增：删除 Session 按钮
+            Button(action: {
+                showDeleteSessionConfirmation = true
+            }) {
+                Label("Delete Session", systemImage: "trash")
+                    .foregroundColor(.red)
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .help("Delete this entire session")
+            
+            Button(action: { isPresented = false }) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(.secondary)
+                    .imageScale(.large)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding()
+    }
+    
+    // MARK: - Tab Selector
+    
+    private var tabSelectorView: some View {
+        HStack(spacing: 0) {
+            tabButton(
+                title: "Transcript",
+                icon: "doc.text",
+                tab: .transcript,
+                count: session.sentenceCount
+            )
+            
+            tabButton(
+                title: "Summaries",
+                icon: "sparkles",
+                tab: .summaries,
+                count: localSummaries.count
+            )
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    private func tabButton(title: String, icon: String, tab: Tab, count: Int) -> some View {
+        Button(action: {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                selectedTab = tab
+            }
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                Text(title)
+                
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(Color.secondary.opacity(0.2))
+                        )
+                }
+            }
+            .font(.subheadline)
+            .foregroundColor(selectedTab == tab ? .primary : .secondary)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .background(
+                selectedTab == tab
+                    ? Color.accentColor.opacity(0.15)
+                    : Color.clear
+            )
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
+    }
+    
+    // MARK: - Content
+    
+    private var contentView: some View {
+        Group {
+            switch selectedTab {
+            case .transcript:
+                transcriptView
+            case .summaries:
+                summariesView
+            }
+        }
+    }
+    
+    // MARK: - Transcript View
+    
+    private var transcriptView: some View {
+        VStack(spacing: 0) {
             // Stats bar
-            HStack(spacing: 24) {
-                StatItem(
-                    icon: "text.alignleft",
-                    label: "Sentences",
-                    value: "\(session.sentenceCount)"
-                )
-                
-                Divider()
-                    .frame(height: 30)
-                
-                StatItem(
-                    icon: "character",
-                    label: "Characters",
-                    value: "\(session.charCount)"
-                )
+            HStack {
+                Label("\(session.sentenceCount) sentences", systemImage: "text.quote")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 
                 Spacer()
                 
-                // Export button
-                Button(action: {
-                    exportTranscript()
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.and.arrow.up")
-                        Text("Export")
-                    }
+                Label("\(session.charCount) characters", systemImage: "character")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                Button(action: exportTranscript) {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                        .font(.caption)
                 }
                 .buttonStyle(.bordered)
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 16)
-            .background(Color.gray.opacity(0.05))
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
             
             Divider()
             
             // Transcript content
             ScrollView {
                 if let transcript = session.transcriptText, !transcript.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        ForEach(Array(transcript.components(separatedBy: "\n").enumerated()), id: \.offset) { index, sentence in
-                            if !sentence.isEmpty {
-                                HStack(alignment: .top, spacing: 12) {
-                                    Text("\(index + 1)")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 40, alignment: .trailing)
-                                        .padding(.top, 2)
-                                    
-                                    Text(sentence)
-                                        .font(.body)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                        }
-                    }
-                    .padding(24)
+                    Text(transcript)
+                        .font(.system(size: 13))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
                 } else {
-                    VStack(spacing: 16) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 48))
-                            .foregroundColor(.gray.opacity(0.5))
-                        
-                        Text("No transcript available")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                        
-                        Text("This session has no recorded transcript.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(40)
+                    Text("No transcript available")
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding()
                 }
             }
         }
-        .frame(width: 700, height: 600)
     }
     
-    // MARK: - Actions
+    // MARK: - Summaries View
+    
+    private var summariesView: some View {
+        VStack(spacing: 0) {
+            if !localSummaries.isEmpty {
+                // Stats bar
+                HStack {
+                    Label("\(localSummaries.count) summaries", systemImage: "sparkles")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Button(action: exportAllSummaries) {
+                        Label("Export All", systemImage: "square.and.arrow.up")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding()
+                .background(Color(NSColor.controlBackgroundColor))
+                
+                Divider()
+                
+                // Summaries list
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(localSummaries) { summary in
+                            SessionSummaryCardView(
+                                summary: summary,
+                                onDelete: {  // 🔧 新增删除回调
+                                    summaryToDelete = summary
+                                    showDeleteSummaryConfirmation = true
+                                }
+                            )
+                        }
+                    }
+                    .padding()
+                }
+            } else {
+                emptyStateView
+            }
+        }
+    }
+    
+    private var emptyStateView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "sparkles.rectangle.stack")
+                .font(.system(size: 48))
+                .foregroundColor(.gray.opacity(0.5))
+            
+            Text("No summaries generated")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("This session doesn't have any AI-generated summaries yet")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+    }
+    
+    // MARK: - Export Functions
     
     private func exportTranscript() {
         guard let transcript = session.transcriptText, !transcript.isEmpty else {
+            print("⚠️ No transcript to export")
             return
         }
         
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "session_\(session.id)_\(session.mode).txt"
-        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "session_\(session.id)_transcript.txt"
         panel.allowedContentTypes = [.plainText]
         
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                do {
-                    // 创建完整内容
-                    var content = ""
-                    content += "Mode: \(session.modeDisplayName)\n"
-                    content += "Date: \(session.formattedStartDate)\n"
-                    content += "Duration: \(session.formattedDuration)\n"
-                    content += "Sentences: \(session.sentenceCount)\n"
-                    content += "=" + String(repeating: "=", count: 59) + "\n\n"
-                    content += transcript
-                    
-                    try content.write(to: url, atomically: true, encoding: .utf8)
-                    print("✅ Exported transcript to: \(url.path)")
-                } catch {
-                    print("❌ Failed to export: \(error)")
-                }
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try transcript.write(to: url, atomically: true, encoding: .utf8)
+                print("✅ Transcript exported to: \(url.path)")
+            } catch {
+                print("❌ Export failed: \(error)")
             }
+        }
+    }
+    
+    private func exportAllSummaries() {
+        guard !localSummaries.isEmpty else {
+            print("⚠️ No summaries to export")
+            return
+        }
+        
+        let content = localSummaries.enumerated().map { index, summary in
+            """
+            ## Summary \(index + 1)
+            **Time**: \(summary.formattedTime)
+            **Duration**: \(summary.formattedDuration)
+            **Sentences**: \(summary.sentenceCount)
+            
+            \(summary.content)
+            """
+        }.joined(separator: "\n\n---\n\n")
+        
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "session_\(session.id)_summaries.md"
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try content.write(to: url, atomically: true, encoding: .utf8)
+                print("✅ Summaries exported to: \(url.path)")
+            } catch {
+                print("❌ Export failed: \(error)")
+            }
+        }
+    }
+    
+    // MARK: - Delete Handlers
+
+    private func deleteSummaryConfirmed() {
+        guard let summary = summaryToDelete else {
+            print("⚠️ No summary to delete")
+            return
+        }
+        
+        print("🗑️ Deleting summary \(summary.id) from local list")
+        
+        // 从本地列表移除
+        withAnimation {
+            localSummaries.removeAll { $0.id == summary.id }
+        }
+        
+        print("✅ Summary removed from local list, count: \(localSummaries.count)")
+        
+        // 调用外部回调
+        if let callback = onDeleteSummary {
+            print("📞 Calling onDeleteSummary callback")
+            callback(summary.id)
+        } else {
+            print("⚠️ No onDeleteSummary callback provided")
+        }
+        
+        summaryToDelete = nil
+    }
+
+    private func deleteSessionConfirmed() {
+        print("🗑️ Deleting session \(session.id)")
+        
+        // 关闭浮窗
+        isPresented = false
+        
+        // 调用外部回调
+        if let callback = onDeleteSession {
+            print("📞 Calling onDeleteSession callback")
+            callback()
+        } else {
+            print("⚠️ No onDeleteSession callback provided")
         }
     }
 }
 
-// MARK: - Stat Item Component
+// MARK: - Session Summary Card View
 
-struct StatItem: View {
-    let icon: String
-    let label: String
-    let value: String
+struct SessionSummaryCardView: View {
+    let summary: SessionSummary
+    let onDelete: () -> Void  // 🔧 新增删除回调
+    
+    @State private var isExpanded: Bool = true
+    @State private var isHovering: Bool = false
     
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .foregroundColor(.blue)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "sparkles")
+                    .foregroundColor(.orange)
+                    .font(.caption)
+                
+                Text(summary.formattedTime)
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
-                Text(value)
-                    .font(.headline)
+                Spacer()
+                
+                // Metadata
+                HStack(spacing: 8) {
+                    Label("\(summary.sentenceCount)", systemImage: "text.quote")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    
+                    Label(summary.formattedDuration, systemImage: "clock")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                
+                // 🔧 新增：删除按钮（hover 时显示）
+                if isHovering {
+                    Button(action: {
+                        print("🔴 Delete Summary button clicked!")
+                        print("   Summary ID: \(summary.id)")
+                        onDelete()
+                    }) {
+                        Image(systemName: "trash")
+                            .foregroundColor(.red)
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete summary")
+                }
+                
+                // Expand/Collapse button
+                Button(action: {
+                    print("📋 Toggle expand for summary \(summary.id)")
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                }) {
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundColor(.secondary)
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.orange.opacity(0.1))
+            
+            // Content
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(parseMarkdownBullets(summary.content), id: \.self) { bullet in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("•")
+                                .foregroundColor(.orange)
+                                .font(.system(size: 14, weight: .bold))
+                            
+                            Text(bullet)
+                                .font(.system(size: 13))
+                                .foregroundColor(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+    }
+    
+    private func parseMarkdownBullets(_ text: String) -> [String] {
+        let lines = text.components(separatedBy: .newlines)
+        var bullets: [String] = []
+        
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            
+            if trimmed.hasPrefix("- ") {
+                bullets.append(String(trimmed.dropFirst(2)))
+            } else if trimmed.hasPrefix("* ") {
+                bullets.append(String(trimmed.dropFirst(2)))
+            } else if !trimmed.isEmpty && !bullets.isEmpty {
+                if let last = bullets.last {
+                    bullets[bullets.count - 1] = last + " " + trimmed
+                }
+            }
+        }
+        
+        return bullets
     }
 }
 
-// MARK: - Preview
+// MARK: - Alert Extensions
 
-#Preview {
-    SessionDetailSheet(
-        session: RecordingSession(
-            id: 1,
-            mode: "lecture",
-            durationSeconds: 120,
-            sentenceCount: 5,
-            charCount: 250,
-            startedAt: Date(),
-            endedAt: Date(),
-            transcriptText: "Hello, this is a test.\nThis is the second sentence.\nAnd another one.\nMore content here.\nFinal sentence."
-        )
-    )
+extension SessionDetailSheet {
+    var deleteSessionAlert: some View {
+        EmptyView()
+            .alert("Delete Session", isPresented: $showDeleteSessionConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    deleteSessionConfirmed()
+                }
+            } message: {
+                Text("Are you sure you want to delete this entire session? This will delete the transcript and all \(localSummaries.count) summaries. This cannot be undone.")
+            }
+    }
+    
+    var deleteSummaryAlert: some View {
+        EmptyView()
+            .alert("Delete Summary", isPresented: $showDeleteSummaryConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    summaryToDelete = nil
+                }
+                Button("Delete", role: .destructive) {
+                    deleteSummaryConfirmed()
+                }
+            } message: {
+                Text("Are you sure you want to delete this summary? This cannot be undone.")
+            }
+    }
+}
+
+// MARK: - Update body to include alerts
+
+extension SessionDetailSheet {
+    var bodyWithAlerts: some View {
+        body
+            .background(deleteSessionAlert)
+            .background(deleteSummaryAlert)
+    }
 }

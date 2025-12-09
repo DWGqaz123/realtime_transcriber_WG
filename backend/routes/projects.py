@@ -29,7 +29,18 @@ class ProjectResponse(BaseModel):
     class Config:
         from_attributes = True
 
-
+class SummaryResponse(BaseModel):
+    id: int
+    content: str
+    created_at: datetime
+    sentence_count: int
+    duration_seconds: int
+    start_sentence_idx: int
+    end_sentence_idx: int
+    
+    class Config:
+        from_attributes = True
+    
 class SessionResponse(BaseModel):
     id: int
     mode: str
@@ -39,6 +50,7 @@ class SessionResponse(BaseModel):
     started_at: datetime
     ended_at: Optional[datetime]
     transcript_text: Optional[str] = ""
+    summaries: Optional[List["SummaryResponse"]] = []
     
     class Config:
         from_attributes = True
@@ -200,6 +212,22 @@ async def get_session_detail(project_id: int, session_id: int):
         
         print(f"✅ Found session {session_id}: {len(session.transcript_text or '')} chars")
         
+        summaries = DatabaseManager.get_session_summaries(session_id)
+        print(f"📝 Found {len(summaries)} summaries for session {session_id}")
+        
+        summary_responses = [
+            SummaryResponse(
+                id=s.id,
+                content=s.content,
+                created_at=s.created_at,
+                sentence_count=s.end_sentence_idx - s.start_sentence_idx + 1,
+                duration_seconds=s.duration_seconds,
+                start_sentence_idx=s.start_sentence_idx,
+                end_sentence_idx=s.end_sentence_idx
+            )
+            for s in summaries
+        ]
+        
         return SessionResponse(
             id=session.id,
             mode=session.mode,
@@ -208,7 +236,8 @@ async def get_session_detail(project_id: int, session_id: int):
             char_count=session.char_count,
             started_at=session.started_at,
             ended_at=session.ended_at,
-            transcript_text=session.transcript_text or ""
+            transcript_text=session.transcript_text or "",
+            summaries=summary_responses
         )
     except HTTPException:
         raise
@@ -271,6 +300,125 @@ async def export_session_file(project_id: int, session_id: int):
         raise
     except Exception as e:
         print(f"❌ Error exporting file: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/{project_id}/sessions/{session_id}")
+async def delete_session(project_id: int, session_id: int):
+    """删除 session（级联删除 summaries 和转录文件）"""
+    try:
+        from pathlib import Path
+        import os
+        
+        print(f"\n🗑️ Deleting session {session_id} from project {project_id}")
+        
+        # 1. 获取 session 信息
+        session = DatabaseManager.get_session_by_id(session_id)
+        
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        if session.project_id != project_id:
+            raise HTTPException(
+                status_code=404, 
+                detail="Session not found in this project"
+            )
+        
+        # 2. 获取项目信息（用于文件路径）
+        project = DatabaseManager.get_project_by_id(project_id)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # 3. 删除转录文件（如果存在）
+        try:
+            current_dir = Path(__file__).parent.parent
+            base_dir = Path.home() / "Library" / "Application Support" / "RealtimeTranscriber" / "transcripts"
+            
+            safe_project_name = "".join(
+                c for c in project.name 
+                if c.isalnum() or c in (' ', '-', '_')
+            ).strip()
+            
+            timestamp = session.started_at.strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"{timestamp}_{session.mode}.txt"
+            filepath = base_dir / safe_project_name / filename
+            
+            if filepath.exists():
+                os.remove(filepath)
+                print(f"✅ Deleted transcript file: {filepath}")
+            else:
+                print(f"⚠️ Transcript file not found: {filepath}")
+                
+        except Exception as e:
+            print(f"⚠️ Error deleting transcript file: {e}")
+            # 继续删除数据库记录
+        
+        # 4. 删除数据库记录（级联删除 summaries）
+        success = DatabaseManager.delete_session(session_id)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete session")
+        
+        print(f"✅ Session {session_id} deleted successfully\n")
+        
+        return {
+            "message": "Session deleted successfully",
+            "session_id": session_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting session: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{project_id}/sessions/{session_id}/summaries/{summary_id}")
+async def delete_summary(project_id: int, session_id: int, summary_id: int):
+    """删除单个摘要"""
+    try:
+        print(f"\n🗑️ Deleting summary {summary_id} from session {session_id}")
+        
+        # 1. 获取 summary
+        summary = DatabaseManager.get_summary_by_id(summary_id)
+        
+        if not summary:
+            raise HTTPException(status_code=404, detail="Summary not found")
+        
+        # 2. 验证 summary 属于该 session 和 project
+        if summary.session_id != session_id:
+            raise HTTPException(
+                status_code=404,
+                detail="Summary not found in this session"
+            )
+        
+        if summary.project_id != project_id:
+            raise HTTPException(
+                status_code=404,
+                detail="Summary not found in this project"
+            )
+        
+        # 3. 删除 summary
+        success = DatabaseManager.delete_summary(summary_id)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete summary")
+        
+        print(f"✅ Summary {summary_id} deleted successfully\n")
+        
+        return {
+            "message": "Summary deleted successfully",
+            "summary_id": summary_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting summary: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
