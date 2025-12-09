@@ -7,6 +7,11 @@ Realtime STT: Scribe v2 Realtime of ElevenLabs
 Desktop Frontend: SwiftUI + AppKit
 Audio capture: AVAudioEngine
 
+<img width="699" height="595" alt="Screenshot 2025-12-09 at 16 56 48" src="https://github.com/user-attachments/assets/91959f92-f692-4080-9010-f229fc3229a8" />
+<img width="699" height="595" alt="Screenshot 2025-12-09 at 16 57 57" src="https://github.com/user-attachments/assets/90a0ec32-5951-4864-9d19-115f346f06b9" />
+<img width="699" height="595" alt="Screenshot 2025-12-09 at 16 58 26" src="https://github.com/user-attachments/assets/13c7851a-a35d-4f07-88b9-932fcbf9db66" />
+<img width="699" height="595" alt="Screenshot 2025-12-09 at 16 58 32" src="https://github.com/user-attachments/assets/08990919-bc2a-4ac5-ae2e-15ea01b08fb5" />
+
 # Experiment
 ## Experiment A
 
@@ -38,27 +43,3 @@ Manual Mode (commit every 35 seconds)
 	•	Classes & lectures
 	•	Long explanations
 	•	Notes summarization
-
-
-```
-
-    ---
-
-
-    # 数据存储位置
-
-所有用户数据存储在：
-```
-~/Library/Application Support/RealtimeTranscriber/
-├── transcripts.db                   # 数据库
-└── transcripts/                     # 转录文件
-    └── {项目名}/
-        └── {时间戳}_{模式}.txt
-```
-
-## 卸载
-
-如需完全删除应用数据：
-```bash
-rm -rf ~/Library/Application\ Support/RealtimeTranscriber/
-```
