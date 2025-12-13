@@ -287,15 +287,12 @@ class DatabaseManager:
 
 
     @staticmethod
-    def get_summary_by_id(summary_id: int) -> Optional[Summary]:
-        """根据 ID 获取摘要"""
+    def get_summary_by_id(summary_id: int):
+        """通过 ID 获取摘要"""
         db = DatabaseManager.get_db()
         try:
             from database.models import Summary
-            
-            summary = db.query(Summary).filter(Summary.id == summary_id).first()
-            return summary
-            
+            return db.query(Summary).filter(Summary.id == summary_id).first()
         finally:
             db.close()
 

@@ -6,7 +6,13 @@ from datetime import datetime
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from config import LogConfig
 
+# 加载 .env 文件
+env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
+from config import SummaryConfig
 
 load_dotenv()
 
@@ -225,6 +231,26 @@ async def startup_event():
         print("🚨 WebSocket connections will fail!")
         print("🚨 Please check the error messages above for the root cause.")
     
+    
+    # 🔇 设置日志模式
+    # 从环境变量读取或手动设置
+    log_mode = os.getenv("LOG_MODE", "quiet").lower()
+    
+    if log_mode == "verbose" or log_mode == "debug":
+        LogConfig.enable_verbose()
+    else:
+        LogConfig.enable_quiet()
+    
+    LogConfig.print_config()
+    
+    # 🔧 验证和打印摘要配置
+    try:
+        SummaryConfig.validate()
+        SummaryConfig.print_config()
+    except ValueError as e:
+        print(f"❌ Configuration Error: {e}")
+        print("⚠️  Summary generation may not work correctly")
+        
     # 打印所有路由
     print("\n📋 Registered Routes:")
     for route in app.routes:

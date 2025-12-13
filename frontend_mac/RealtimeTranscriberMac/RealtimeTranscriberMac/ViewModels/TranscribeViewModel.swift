@@ -197,7 +197,7 @@ final class TranscribeViewModel: ObservableObject {
                 self.client.connect()
                 
                 // 2. 🔧 发送项目 ID（新增）
-                self.client.send(text: "PROJECT:\(projectId)")
+                self.client.send(text: "PROJECT_ID:\(projectId)")
                 print("📁 Sent project ID: \(projectId)")
                 
                 // 3. 发送模式配置

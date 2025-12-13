@@ -11,15 +11,18 @@ from typing import Optional
 import httpx
 from datetime import datetime
 import httpx
-
+from config import SummaryConfig
 class SummaryService:
     """摘要生成服务"""
     
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
-        self.api_url = "https://api.openai.com/v1/chat/completions"
-        self.model = "gpt-4-turbo"  # 或 "gpt-4-turbo-preview"
-    
+        
+        # 🔧 使用配置类
+        self.api_key = api_key or SummaryConfig.get_api_key()
+        self.api_url = SummaryConfig.API_URL or "https://api.openai.com/v1/chat/completions"
+        self.model = SummaryConfig.MODEL
+        self.temperature = SummaryConfig.TEMPERATURE
+        self.max_tokens = SummaryConfig.MAX_TOKENS
         if not self.api_key:
             print("⚠️ OPENAI_API_KEY not set, summary generation will fail")
         
@@ -113,33 +116,52 @@ class SummaryService:
             return None
     
     def _build_prompt(self, buffer_text: str, context: str, mode: str) -> str:
-        """构建摘要 prompt"""
-        
+        """构建摘要 prompt
+            Args:
+                buffer_text: 待摘要的文本（当前快照）
+                context: 上一段的末尾句子（上下文）
+                mode: 模式（lecture/discussion）
+            Returns:
+                str: 完整的 Prompt
+        """
+        # 模式特定的指令
         if mode == "lecture":
-            task_desc = "讲座内容"
-            instruction = "提取 3-5 个关键知识点，包括：主要概念、重要结论、关键数据"
+            focus = "提取主要概念、重要结论、关键数据"
         else:  # discussion
-            task_desc = "讨论内容"
-            instruction = "总结 3-5 个核心观点，包括：主要论点、不同立场、达成的共识"
+            focus = "总结核心观点、不同立场、达成的共识"
         
-        prompt = f"""请基于以下{task_desc}生成简洁的知识点摘要。
+        if context:
+        # 有上下文
+            prompt = f"""请基于以下内容生成简洁的知识点摘要。
 
-{f"【上下文】（用于理解连贯性）：{context}" if context else ""}
+        【上下文】（仅供理解连贯性，不要对此部分生成摘要）：
+        {context}
 
-【当前内容】：
-{buffer_text}
+        【当前内容】（请对此部分生成摘要）：
+        {buffer_text}
 
-要求：
-1. {instruction}
-2. 使用 Markdown 格式，每个知识点用 `- ` 开头
-3. 每个知识点 1-2 句话，简洁明了
-4. 突出核心概念和关键信息
-5. 不要添加标题，直接列出知识点
+        要求：
+        1. 根据【上下文】理解背景和连贯性
+        2. 只对【当前内容】生成 3-5 个关键知识点
+        3. 不要重复【上下文】中已提到的概念
+        4. {focus}
+        5. 使用 Markdown 格式，每个知识点用 `- ` 开头
+        6. 每个知识点 1-2 句话，简洁明了
+        7. 突出核心概念和关键信息
+        8. 不要添加标题，直接列出知识点"""
+        else:
+            # 无上下文（第一次摘要）
+            prompt = f"""请基于以下内容生成简洁的知识点摘要。
+                    【内容】：
+                    {buffer_text}
 
-示例格式：
-- 知识点1：简洁描述
-- 知识点2：简洁描述
-- 知识点3：简洁描述"""
+                    要求：
+                    1. 提取 3-5 个关键知识点
+                    2. {focus}
+                    3. 使用 Markdown 格式，每个知识点用 `- ` 开头
+                    4. 每个知识点 1-2 句话，简洁明了
+                    5. 突出核心概念和关键信息
+                    6. 不要添加标题，直接列出知识点"""
         
         return prompt
 

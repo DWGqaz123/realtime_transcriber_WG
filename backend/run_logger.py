@@ -1,6 +1,7 @@
 # backend/run_logger.py
 from pathlib import Path
 from typing import Dict, Any
+from config import LogConfig
 
 
 class RunLogger:
@@ -20,7 +21,8 @@ class RunLogger:
         print(f"[RunLogger] Start run for session {session_id}, meta={meta}")
 
     def log_event(self, session_id: str, event: Dict[str, Any]) -> None:
-        print(f"[RunLogger] Event for {session_id}: {event}")
+        if LogConfig.LOG_RUN_EVENTS:
+            print(f"[RunLogger] Event for {session_id}: {event}")
 
     def finish_run(self, session_id: str) -> None:
         print(f"[RunLogger] Finish run for session {session_id}")
