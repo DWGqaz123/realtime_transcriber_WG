@@ -330,7 +330,14 @@ class SessionManager:
         6. 释放生成锁
         """
         session_id = session.id
-        
+        # 🔧 发送摘要开始信号给前端
+        try:
+            await session.websocket.send_text("[summary_start]")
+            if LogConfig.LOG_SUMMARY:
+                print("📤 Sent summary_start signal to client")
+        except Exception as e:
+            print(f"⚠️ Failed to send summary_start: {e}")
+            
         if LogConfig.LOG_SUMMARY:
             print(f"\n{'='*60}")
             print(f"🤖 SUMMARY GENERATION START")
@@ -728,8 +735,7 @@ class SessionManager:
         
         print(f"   ⚠️ Ingestion buffer is empty\n")
         return False
-        
-        
+              
     async def _save_session_to_db(self, session_id: str) -> None:
         """
         save the current session's transcript to the database.

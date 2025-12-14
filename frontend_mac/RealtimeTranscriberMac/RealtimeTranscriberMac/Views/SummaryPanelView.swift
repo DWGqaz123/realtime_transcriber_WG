@@ -84,12 +84,16 @@ struct SummaryPanelView: View {
     private var summaryListView: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(viewModel.summaries) { summary in
+                ForEach(Array(viewModel.summaries.enumerated()), id: \.element.id) { index, summary in
                     SummaryCardView(summary: summary)
-                        .transition(.scale.combined(with: .opacity))
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.8).combined(with: .opacity),
+                            removal: .opacity
+                        ))
+                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: viewModel.summaries.count)
                 }
             }
-            .padding(12)
+            .padding()
         }
     }
 }

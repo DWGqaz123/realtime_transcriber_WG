@@ -205,6 +205,89 @@ struct RecordingView: View {
                 Spacer()
             }
             
+            // summary 生成进度
+            if viewModel.isRecording && !viewModel.summaryGenerationProgress.isEmpty {
+                            HStack(spacing: 12) {
+                                // 进度文本
+                                Text(viewModel.summaryGenerationProgress)
+                                    .font(.system(size: 13))
+                                    .foregroundColor(viewModel.isGeneratingSummary ? .orange : .blue)
+                                
+                                Spacer()
+                                
+                                // 倒计时数字
+                                if !viewModel.isGeneratingSummary && viewModel.nextSummaryCountdown > 0 {
+                                    Text("\(viewModel.nextSummaryCountdown)s")
+                                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
+                                        .background(Color.secondary.opacity(0.15))
+                                        .cornerRadius(8)
+                                }
+                                
+                                // 生成中的加载动画
+                                if viewModel.isGeneratingSummary {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                        .frame(width: 16, height: 16)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(
+                                        viewModel.isGeneratingSummary
+                                            ? Color.orange.opacity(0.1)
+                                            : Color.blue.opacity(0.08)
+                                    )
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(
+                                        viewModel.isGeneratingSummary
+                                            ? Color.orange.opacity(0.3)
+                                            : Color.blue.opacity(0.2),
+                                        lineWidth: 1
+                                    )
+                            )
+                        }
+                        
+                        // 🔧 ==================== 可选：进度条（视觉化）====================
+                        if viewModel.isRecording && !viewModel.isGeneratingSummary && viewModel.nextSummaryCountdown > 0 {
+                            GeometryReader { geometry in
+                                ZStack(alignment: .leading) {
+                                    // 背景
+                                    Rectangle()
+                                        .fill(Color.secondary.opacity(0.15))
+                                        .frame(height: 3)
+                                        .cornerRadius(1.5)
+                                    
+                                    // 进度
+                                    Rectangle()
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [.blue, .purple]),
+                                                startPoint: .leading,
+                                                endPoint: .trailing
+                                            )
+                                        )
+                                        .frame(
+                                            width: geometry.size.width * CGFloat(30 - viewModel.nextSummaryCountdown) / 30.0,
+                                            height: 3
+                                        )
+                                        .cornerRadius(1.5)
+                                        .animation(.linear(duration: 0.5), value: viewModel.nextSummaryCountdown)
+                                }
+                            }
+                            .frame(height: 3)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
+                        }
+            
+            
+            
             // 音频电平可视化区域
             if viewModel.isRecording {
                 VStack(alignment: .leading, spacing: 8) {

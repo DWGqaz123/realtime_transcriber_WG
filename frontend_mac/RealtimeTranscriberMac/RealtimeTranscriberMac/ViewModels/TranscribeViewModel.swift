@@ -53,6 +53,18 @@ final class TranscribeViewModel: ObservableObject {
     // 摘要列表
     @Published var summaries: [Summary] = []
     
+    // 🔧 新增：摘要生成状态
+    @Published var isGeneratingSummary: Bool = false
+    @Published var nextSummaryCountdown: Int = 0  // 倒计时秒数
+    @Published var lastSummaryTimestamp: Date? = nil
+    @Published var summaryGenerationProgress: String = ""  // 进度文本
+
+    // 🔧 新增：计时器
+    private var summaryCountdownTimer: Timer?
+
+    // 🔧 新增：配置常量
+    private let summaryIntervalSeconds: Int = 30  // 与后端配置一致
+    
     // MARK: - Private Properties
     
     private let client = TranscriptionClient()
@@ -196,7 +208,7 @@ final class TranscribeViewModel: ObservableObject {
                 // 1. 连接 WebSocket
                 self.client.connect()
                 
-                // 2. 🔧 发送项目 ID（新增）
+                // 2. 🔧 发送项目 ID
                 self.client.send(text: "PROJECT_ID:\(projectId)")
                 print("📁 Sent project ID: \(projectId)")
                 
@@ -209,6 +221,8 @@ final class TranscribeViewModel: ObservableObject {
                 do {
                     try self.audioCapture.start()
                     print("✅ Recording started successfully")
+                    // 🔧 启动摘要倒计时
+                    self.startSummaryCountdown()
                 } catch {
                     print("❌ Failed to start audio capture: \(error)")
                     self.currentSubtitle = "Error: \(error.localizedDescription)"
@@ -239,6 +253,9 @@ final class TranscribeViewModel: ObservableObject {
         isRecording = false
         currentSubtitle = ""  // 清空字幕
         permissionStatus = "Recording stopped - Ready to save 💾"
+        
+        // 停止倒计时
+        stopSummaryCountdown()
         
         // 停止计时器
         recordingTimer?.invalidate()
@@ -324,16 +341,22 @@ final class TranscribeViewModel: ObservableObject {
                 self.summaries.removeAll()
             }
             
+        } else if text.hasPrefix("[summary_start]") {
+            // 🔧 新增：处理摘要开始信号
+            self.isGeneratingSummary = true
+            self.summaryGenerationProgress = "🤖 Generating summary..."
+            print("🤖 Summary generation started")
+            
         } else if text.hasPrefix("[summary]") {
-            // 🔧 新增：处理摘要消息
+            // 处理摘要消息
             let jsonString = text.replacingOccurrences(of: "[summary] ", with: "")
             print("📝 Received summary: \(jsonString.prefix(100))...")
+            
             do {
                 let jsonData = jsonString.data(using: .utf8)!
                 let decoder = JSONDecoder()
                 
-                // 🔧 修改：使用自定义日期解码策略
-                // 🔧 自定义日期解码策略
+                // 使用自定义日期解码策略
                 decoder.dateDecodingStrategy = .custom { decoder in
                     let container = try decoder.singleValueContainer()
                     let dateString = try container.decode(String.self)
@@ -373,18 +396,25 @@ final class TranscribeViewModel: ObservableObject {
                 
                 let summary = try decoder.decode(Summary.self, from: jsonData)
                 
+                // 🔧 标记生成完成
+                self.isGeneratingSummary = false
+                
                 // 添加到列表
                 self.summaries.insert(summary, at: 0)
+                
+                // 🔧 重置倒计时
+                self.resetSummaryCountdown()
                 
                 print("✅ Summary added successfully!")
                 print("   ID: \(summary.id)")
                 print("   Content length: \(summary.content.count) chars")
                 print("   Total summaries: \(self.summaries.count)")
                 
-                // 显示提示
-                self.currentSubtitle = "✨ New summary generated"
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    if self.currentSubtitle == "✨ New summary generated" {
+                // 🔧 显示临时提示（3秒后消失）
+                self.currentSubtitle = "✨ New summary generated!"
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    if self.currentSubtitle == "✨ New summary generated!" {
                         self.currentSubtitle = ""
                     }
                 }
@@ -393,13 +423,24 @@ final class TranscribeViewModel: ObservableObject {
                 print("❌ Decoding error - data corrupted:")
                 print("   \(context.debugDescription)")
                 print("   JSON: \(jsonString)")
+                
+                // 🔧 错误时也标记生成完成
+                self.isGeneratingSummary = false
+                
             } catch DecodingError.keyNotFound(let key, let context) {
                 print("❌ Decoding error - key not found:")
                 print("   Key: \(key)")
                 print("   \(context.debugDescription)")
+                
+                // 🔧 错误时也标记生成完成
+                self.isGeneratingSummary = false
+                
             } catch {
                 print("❌ Failed to decode summary: \(error)")
                 print("   JSON: \(jsonString)")
+                
+                // 🔧 错误时也标记生成完成
+                self.isGeneratingSummary = false
             }
             
         } else {
@@ -445,5 +486,61 @@ final class TranscribeViewModel: ObservableObject {
     var formattedTrafficSaved: String {
         let savedKB = (skippedChunks * 3200) / 1024  // 假设每块 3200 bytes
         return "\(savedKB) KB"
+    }
+    
+    // MARK: - Summary Progress Management
+
+    /// 启动摘要倒计时
+    private func startSummaryCountdown() {
+        // 重置状态
+        lastSummaryTimestamp = Date()
+        nextSummaryCountdown = summaryIntervalSeconds
+        
+        // 启动计时器
+        summaryCountdownTimer?.invalidate()
+        summaryCountdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            
+            Task { @MainActor in
+                self.updateSummaryCountdown()
+            }
+        }
+        
+        print("⏱️ Summary countdown started")
+    }
+
+    /// 更新倒计时
+    private func updateSummaryCountdown() {
+        guard let lastTimestamp = lastSummaryTimestamp else { return }
+        
+        let elapsed = Int(Date().timeIntervalSince(lastTimestamp))
+        let remaining = max(0, summaryIntervalSeconds - elapsed)
+        
+        nextSummaryCountdown = remaining
+        
+        // 更新进度文本
+        if isGeneratingSummary {
+            summaryGenerationProgress = "🤖 Generating summary..."
+        } else if remaining > 0 {
+            summaryGenerationProgress = "⏳ Next summary in: \(remaining)s"
+        } else {
+            summaryGenerationProgress = "⏳ Waiting for complete sentence..."
+        }
+    }
+
+    /// 停止倒计时
+    private func stopSummaryCountdown() {
+        summaryCountdownTimer?.invalidate()
+        summaryCountdownTimer = nil
+        nextSummaryCountdown = 0
+        summaryGenerationProgress = ""
+        print("⏹️ Summary countdown stopped")
+    }
+
+    /// 重置倒计时（摘要生成后）
+    private func resetSummaryCountdown() {
+        lastSummaryTimestamp = Date()
+        nextSummaryCountdown = summaryIntervalSeconds
+        print("🔄 Summary countdown reset")
     }
 }
