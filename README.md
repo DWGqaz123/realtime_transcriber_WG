@@ -1,79 +1,175 @@
-# realtime_transcriber_WG
-A speech to text tool using api from Scribe v2 Realtime of ElevenLabs
+# 🧠 AI-Powered Real-Time Memory Assistant
 
-# Tech Stack
-Backend: FastAPI（Python 3.11+）
-Realtime STT: Scribe v2 Realtime of ElevenLabs
-Desktop Frontend: SwiftUI + AppKit
-Audio capture: AVAudioEngine
-
-<img width="699" height="595" alt="Screenshot 2025-12-09 at 16 56 48" src="https://github.com/user-attachments/assets/91959f92-f692-4080-9010-f229fc3229a8" />
-<img width="699" height="595" alt="Screenshot 2025-12-09 at 16 57 57" src="https://github.com/user-attachments/assets/90a0ec32-5951-4864-9d19-115f346f06b9" />
-<img width="699" height="595" alt="Screenshot 2025-12-09 at 16 58 26" src="https://github.com/user-attachments/assets/13c7851a-a35d-4f07-88b9-932fcbf9db66" />
-<img width="699" height="595" alt="Screenshot 2025-12-09 at 16 58 32" src="https://github.com/user-attachments/assets/08990919-bc2a-4ac5-ae2e-15ea01b08fb5" />
-
-<<<<<<< HEAD
-# Tech detail 
-### (Atomic Transfer)
-```
-时间轴：
-T=5:00.000  触发条件满足
-            ↓
-T=5:00.001  【原子操作开始】
-            ├─ Step 1: 复制
-            │  processing_snapshot = ingestion_buffer.copy()
-            │
-            ├─ Step 2: 清空
-            │  ingestion_buffer.clear()
-            │
-            ├─ Step 3: 设置锁
-            │  is_generating = True
-            │
-            └─ Step 4: 记录时间
-               last_summary_time = now
-            【原子操作结束 - 总耗时 <1ms】
-            ↓
-T=5:00.002  接收缓冲区已就绪，可接收新数据
-            处理快照开始异步处理（不影响接收）
-            ↓
-T=5:00.100  新的 [final] 到达
-            → 直接写入 ingestion_buffer
-            → processing_snapshot 不受影响
-            ↓
-T=5:15.000  LLM 返回摘要（耗时 15 秒）
-            ↓
-            保存、推送、更新上下文
-            ↓
-            is_generating = False
-```
-
-**关键点**：
-1. ⚡ **微秒级操作**：复制和清空在 <1ms 内完成
-2. 🔒 **立即加锁**：防止重复触发
-3. 🎯 **数据隔离**：新旧数据完全分离
-4. ⏱️ **立即重置计时器**：防止时间判断误差
+> **A macOS-native productivity tool that turns voice conversations into structured knowledge.** featuring real-time transcription, intelligent context-aware summarization, and local semantic search.
 
 ---
 
-### 上下文桥接机制 (Context Bridging)
+## 📖 Overview
 
-#### 上下文管理策略
+This project is a full-stack AI application designed to close the loop between **capturing information** and **retrieving knowledge**. Unlike traditional recorders that leave you with hours of raw audio, this assistant acts as a "second brain":
+
+1. **Listens** using low-latency transcription (ElevenLabs Scribe).
+2. **Thinks** by generating structured, context-aware summaries every ~30 seconds (GPT-4).
+3. **Remembers** by indexing content locally for semantic retrieval (FAISS + SentenceTransformers).
+
+It creates a seamless pipeline from **Speech**  **Text**  **Insight**  **Long-term Memory**.
+
+---
+
+## ✨ Key Features
+
+### ⚡️ Real-Time Intelligence
+
+* **Live Transcription:** Integrated with ElevenLabs Scribe v2 for <100ms latency speech-to-text.
+* **Smart Ticker:** Generates structured summaries (bullet points & action items) in real-time without interrupting the transcription flow.
+* **Adaptive Triggering:** Uses a hybrid algorithm (Time + Sentence Count + Semantic Integrity) to ensure summaries are generated at natural pauses, not arbitrary time cuts.
+
+### 🧠 Long-Term Memory (RAG)
+
+* **Local Vectorization:** Uses `paraphrase-multilingual-MiniLM-L12-v2` to embed text locally on the CPU (~6 texts/sec). **Zero API cost for storage.**
+* **Semantic Search:** Built on **FAISS (Facebook AI Similarity Search)**. Find content by meaning (e.g., query "Budget issues" to find segments about "financial constraints").
+* **Asynchronous Indexing:** Indexing happens in the background via non-blocking tasks, ensuring the UI never freezes.
+
+### 🛡️ Architecture Highlights
+
+* **Double-Container Buffering:** Solves the data-loss problem common in streaming applications.
+* *Ingestion Buffer:* Always open for incoming audio text.
+* *Processing Snapshot:* Atomically isolated for LLM inference.
+
+
+* **Privacy First:** Vector embeddings and databases (SQLite + Chroma/FAISS) are stored locally on the user's machine.
+
+---
+
+## 🏗 System Architecture
+
+### 1. The "Double-Container" Pipeline
+
+One of the core engineering challenges was handling the race condition between the continuous WebSocket stream and the latent LLM inference.
+
+```mermaid
+graph TD
+    WS[WebSocket Stream] -->|Push Text| IB[📥 Ingestion Buffer]
+    
+    subgraph "Atomic Transfer (Micro-second)"
+        IB -->|Cut & Move| PS[📸 Processing Snapshot]
+    end
+    
+    PS -->|Prompt Construction| GPT[OpenAI GPT-4]
+    GPT -->|Summary| DB[(SQLite)]
+    GPT -->|Broadcast| UI[SwiftUI Frontend]
+    
+    subgraph "Context Management"
+        PS -->|Extract Last 3 Sentences| Cache[Context Cache]
+        Cache -->|Inject into Next Prompt| GPT
+    end
+
 ```
-生命周期：
 
-录音开始
-  ↓
-context_cache = []  (空)
-  ↓
-第一次摘要
-  ├─ Input:  context_cache (空) + processing_snapshot (句1-10)
-  ├─ Output: Summary 1
-  └─ Update: context_cache = [句8, 句9, 句10]  (最后3句)
-  ↓
-第二次摘要 (5分钟后)
-  ├─ Input:  context_cache (句8-10) + processing_snapshot (句11-20)
-  ├─ Output: Summary 2
-  └─ Update: context_cache = [句18, 句19, 句20]
-  ↓
-第三次摘要
-  ├─ Input:  context_cache (句18-20) + processing_snapshot (句21-30)
+### 2. The Local RAG Engine
+
+A privacy-focused implementation of Retrieval-Augmented Generation.
+
+* **Ingest:** Finished sessions are chunked.
+* **Embed:** `SentenceTransformers` (Local CPU) converts chunks to 384-dimensional vectors.
+* **Index:** Vectors are stored in a `FAISS IndexFlatIP` structure for efficient cosine similarity search.
+* **Retrieve:** User queries are vectorized and matched against the index to return the Top-K relevant segments.
+
+---
+
+## 🛠 Tech Stack
+
+### Backend (Python 3.10+)
+
+* **Framework:** FastAPI (Async Web Server)
+* **Real-time:** WebSockets
+* **Database:** SQLAlchemy + SQLite
+* **AI & ML:**
+* OpenAI API (Summarization)
+* ElevenLabs API (Scribe v2 STT)
+* SentenceTransformers (Local Embedding)
+* FAISS (Vector Indexing)
+
+
+
+### Frontend (macOS)
+
+* **Language:** Swift 5
+* **UI Framework:** SwiftUI
+* **Architecture:** MVVM + Combine
+* **Audio:** AVFoundation (High-performance capture)
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+* macOS 13.0+ (Ventura or later)
+* Python 3.10+
+* Xcode 14+
+* API Keys for OpenAI and ElevenLabs.
+
+### 1. Backend Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/project-name.git
+cd project-name/backend
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Create .env file
+echo "OPENAI_API_KEY=your_key" > .env
+echo "ELEVENLABS_API_KEY=your_key" >> .env
+
+# Run the server
+uvicorn main:app --reload
+
+```
+
+### 2. Frontend Setup
+
+1. Open `frontend/YourApp.xcodeproj` in Xcode.
+2. Ensure the backend is running on `http://localhost:8000`.
+3. Build and Run (Cmd + R).
+
+---
+
+## 📸 Screenshots
+
+| Real-time Transcription | Semantic Search |
+| --- | --- |
+| *(Place screenshot of the main transcription view here)* | *(Place screenshot of the search results view here)* |
+
+---
+
+## 🔮 Future Roadmap
+
+* [ ] **GPU Acceleration:** Move local embedding to Metal (MPS) for faster processing.
+* [ ] **Graph View:** Visualize connections between different meetings/sessions.
+* [ ] **Multi-modal:** Support indexing of shared images or screen captures during meetings.
+* [ ] **Export:** Export summaries to Notion/Obsidian.
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
+
+---
+
+## 📧 Contact
+
+**Winston (Wenguang) Dong** Master of Information Systems Management @ CMU
+
+[https://www.linkedin.com/in/wenguang-qaz1105/] | [wenguand@andrew.cmu.edu]
+
+---
+
+*Built with ❤️ at Carnegie Mellon University*
