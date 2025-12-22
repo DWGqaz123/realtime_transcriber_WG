@@ -1,6 +1,6 @@
 # backend/database/models.py
 
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -71,13 +71,47 @@ class Summary(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     duration_seconds = Column(Integer)  # 这段摘要覆盖的时长
     
-    # 🔧 向量化相关（预留）
-    embedding_status = Column(String(50), default="pending")  # pending, processing, completed, failed
-    embedding_vector = Column(Text, nullable=True)  # JSON 格式存储向量（或使用专门的向量数据库）
     
     # 关系
     session = relationship("Session", back_populates="summaries")
     project = relationship("Project", back_populates="summaries")
+    embedding = relationship("Embedding", back_populates="summary", uselist=False, cascade="all, delete-orphan")
+    
+    # 索引状态
+    is_indexed = Column(Boolean, default=False)
+    indexed_at = Column(DateTime)
+    
+    
     
     def __repr__(self):
         return f"<Summary(id={self.id}, session_id={self.session_id}, created_at={self.created_at})>"
+
+
+class Embedding(Base):
+    """向量嵌入表（存储元数据，向量存在 FAISS）"""
+    __tablename__ = "embeddings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # 关联信息
+    summary_id = Column(Integer, ForeignKey("summaries.id", ondelete="CASCADE"), unique=True, nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    
+    # FAISS 索引信息
+    faiss_index_id = Column(Integer, nullable=False)  # FAISS 内部 ID
+    
+    # 元数据（用于过滤和展示）
+    content_preview = Column(Text)                     # 前 200 字符
+    session_mode = Column(String(50))                  # lecture / discussion
+    
+    # 索引状态
+    indexed_at = Column(DateTime, default=datetime.utcnow)
+    embedding_model = Column(String(100), default="paraphrase-multilingual-MiniLM-L12-v2")
+    embedding_dimension = Column(Integer, default=384)
+    
+    # 关系
+    summary = relationship("Summary", back_populates="embedding")
+    project = relationship("Project")
+    
+    def __repr__(self):
+        return f"<Embedding(id={self.id}, summary_id={self.summary_id}, faiss_id={self.faiss_index_id})>"

@@ -207,7 +207,7 @@ final class TranscribeViewModel: ObservableObject {
                 
                 // 1. 连接 WebSocket
                 self.client.connect()
-                
+                try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1秒
                 // 2. 🔧 发送项目 ID
                 self.client.send(text: "PROJECT_ID:\(projectId)")
                 print("📁 Sent project ID: \(projectId)")
@@ -313,7 +313,31 @@ final class TranscribeViewModel: ObservableObject {
             }
             self.fullTranscript += content
             
-        }else if text.hasPrefix("[save]") {
+        }else if text.hasPrefix("[indexing_start]") {
+            // 🔧 索引开始
+            print("📇 Indexing started")
+            // 可选：显示索引进度
+            // self.currentSubtitle = "Indexing summaries..."
+            
+        } else if text.hasPrefix("[indexing_complete]") {
+            // 🔧 索引完成
+            let jsonString = text.replacingOccurrences(of: "[indexing_complete] ", with: "")
+            print("✅ Indexing complete: \(jsonString)")
+            
+            // 可选：显示完成提示
+            // self.currentSubtitle = "✨ Summaries indexed!"
+            // DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            //     if self.currentSubtitle == "✨ Summaries indexed!" {
+            //         self.currentSubtitle = ""
+            //     }
+            // }
+            
+        } else if text.hasPrefix("[indexing_error]") {
+            // 🔧 索引失败
+            let jsonString = text.replacingOccurrences(of: "[indexing_error] ", with: "")
+            print("❌ Indexing error: \(jsonString)")
+            
+        } else if text.hasPrefix("[save]") {
             // save
             let content = text.replacingOccurrences(of: "[save] ", with: "")
             print("💾 Save response: \(content)")

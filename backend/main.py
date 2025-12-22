@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from config import LogConfig
+from routes import projects, search 
 
 # 加载 .env 文件
 env_path = Path(__file__).parent / ".env"
@@ -87,6 +88,7 @@ app.add_middleware(
 
 app.include_router(projects.router)
 print("✅ Projects router registered")
+app.include_router(search.router) 
 
 # ========== 基础端点 ==========
 

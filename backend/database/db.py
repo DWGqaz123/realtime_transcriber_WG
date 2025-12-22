@@ -26,16 +26,26 @@ SessionLocal = sessionmaker(bind=engine)
 class DatabaseManager:
     """数据库管理器"""
     
+    _engine = None
+    _SessionLocal = None
+    
+    @staticmethod
     @staticmethod
     def get_db() -> DBSession:
         """获取数据库会话"""
-        db = SessionLocal()
+        # 🔧 确保数据库已初始化
+        if DatabaseManager._SessionLocal is None:
+            DatabaseManager._init_db()
+        
+        db = DatabaseManager._SessionLocal()
         try:
             return db
         except:
             db.close()
             raise
+        
     @staticmethod
+
     def _init_db():
         """初始化数据库"""
         if DatabaseManager._engine is None:
@@ -230,9 +240,7 @@ class DatabaseManager:
                 start_sentence_idx=start_sentence_idx,
                 end_sentence_idx=end_sentence_idx,
                 duration_seconds=duration_seconds,
-                created_at=datetime.utcnow(),
-                embedding_status="pending"
-            )
+                created_at=datetime.utcnow()            )
             
             db.add(summary)
             db.commit()

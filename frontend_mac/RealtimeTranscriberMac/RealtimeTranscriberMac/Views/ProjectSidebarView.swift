@@ -90,6 +90,15 @@ struct ProjectSidebarView: View {
             footerView
         }
         .frame(minWidth: 250, idealWidth: 300, maxWidth: 350)
+        .sheet(isPresented: $showCreateSheet) {
+            CreateProjectSheet { name, description in
+                await viewModel.createProject(
+                    name: name,
+                    description: description.isEmpty ? "" : description  // ✅ 传递空字符串
+                )
+                await viewModel.loadProjects()
+            }
+        }
         .sheet(isPresented: $viewModel.showSessionDetail) {
             if let session = viewModel.selectedSession {
                 // 🔧 在闭包外部捕获 IDs
@@ -216,6 +225,7 @@ struct ProjectSidebarView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        
     }
     
     // MARK: - Footer

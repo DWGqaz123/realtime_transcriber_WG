@@ -227,3 +227,8 @@ DerivedData/
 # create transcripts directory to be ignored by git
 mkdir -p backend/transcripts
 touch backend/transcripts/.gitkeep
+
+# create models directory to be ignored by git
+backend/models/
+
+

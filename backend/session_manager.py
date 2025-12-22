@@ -1,4 +1,4 @@
-# backend/session_manager.py (Improved Version)
+# backend/session_manager.py
 import asyncio
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Any, List
@@ -10,13 +10,15 @@ from run_logger import RunLogger
 from elevenlabs_client import ElevenLabsRealtimeClient, ElevenLabsConfig
 import os
 import time
+import json
 from summary_service import get_summary_service
 from database.db import DatabaseManager
 from datetime import datetime
+from indexing_service import get_indexing_service
 
 
 @dataclass
-class Session:
+class LiveSession:
     """会话数据类 - 管理单个录音会话的状态"""
     
     id: str
@@ -88,12 +90,12 @@ class SessionManager:
             api_key: ElevenLabs API key. If None, read from environment.
         """
         # 原有字段
-        self.sessions: Dict[str, Session] = {}
+        self.sessions: Dict[str, LiveSession] = {}
         self.run_logger = run_logger
         self._api_key = api_key or os.getenv("ELEVENLABS_API_KEY", "")
-        
-        # 摘要服务
+
         self.summary_service: Optional[SummaryService] = None
+        self.indexing_service = get_indexing_service()
         
         print("✨ SessionManager initialized")
         print(f"   Run logger: {'enabled' if run_logger else 'disabled'}")
@@ -112,7 +114,7 @@ class SessionManager:
         from unittest.mock import MagicMock
         test_ws = MagicMock()
         
-        test_session = Session(
+        test_session = LiveSession(
             id="test-validation",
             websocket=test_ws,
             meta={"mode": "lecture"},
@@ -219,7 +221,7 @@ class SessionManager:
         
         return False
     
-    def _update_context_cache(self, session: Session, sentences: List[str]) -> None:
+    def _update_context_cache(self, session: LiveSession, sentences: List[str]) -> None:
         """
         更新上下文缓存（保留最后 N 句）
         
@@ -239,7 +241,7 @@ class SessionManager:
             preview = sent[:50] + "..." if len(sent) > 50 else sent
             print(f"   [{i}] {preview}")
     
-    def _atomic_transfer(self, session: Session) -> List[str]:
+    def _atomic_transfer(self, session: LiveSession) -> List[str]:
         """
         原子转移：从接收缓冲区复制到处理快照
         
@@ -288,7 +290,7 @@ class SessionManager:
         
         return session.processing_snapshot
     
-    def _format_context_for_prompt(self, session: Session) -> str:
+    def _format_context_for_prompt(self, session: LiveSession) -> str:
         """
         格式化上下文缓存为 Prompt 字符串
         
@@ -315,7 +317,7 @@ class SessionManager:
         """
         return "\n".join(snapshot)
     
-    async def _generate_and_send_summary(self, session: Session):
+    async def _generate_and_send_summary(self, session: LiveSession):
         """
         生成并发送摘要
         
@@ -571,7 +573,7 @@ class SessionManager:
             min_silence_duration_ms=mode_config.min_silence_duration_ms,
         )
 
-    async def create_session(self, websocket: WebSocket) -> Session:
+    async def create_session(self, websocket: WebSocket) -> LiveSession:
         """
         Create a new session for the given WebSocket connection.
 
@@ -580,7 +582,7 @@ class SessionManager:
         - This allows users to connect without immediately consuming resources.
         """
         session_id = str(uuid4())
-        session = Session(
+        session = LiveSession(
             id=session_id,
             websocket=websocket,
             meta={},  
@@ -661,7 +663,7 @@ class SessionManager:
         del self.sessions[session_id]
         print(f"[SessionManager] Session {session_id} fully cleaned up")
     
-    def _should_generate_summary(self, session: Session) -> bool:
+    def _should_generate_summary(self, session: LiveSession) -> bool:
         """
         检查是否应该生成摘要
         
@@ -747,7 +749,7 @@ class SessionManager:
         
         # check if already saved
         if session.is_saved:
-            print(f"[SessionManager] Session {session_id} already saved")
+            print(f"[SessionManager] LiveSession {session_id} already saved")
             try:
                 await session.websocket.send_text("[save] Session already saved")
             except:
@@ -783,7 +785,7 @@ class SessionManager:
             # combine transcript parts
             full_transcript = "\n".join(session.transcript_parts)
             
-            # satistics
+            # statistics
             sentence_count = len(session.transcript_parts)
             char_count = len(full_transcript)
             
@@ -800,7 +802,12 @@ class SessionManager:
             # mark as saved
             session.is_saved = True
 
-            print(f"[SessionManager] ✅ Saved session to DB: {duration}s, {sentence_count} sentences, {char_count} chars")
+            print(f"[SessionManager] ✅ Saved session to DB")
+            print(f"   DB Session ID: {session.db_session_id}")
+            print(f"   Duration: {duration}s")
+            print(f"   Sentences: {sentence_count}")
+            print(f"   Characters: {char_count}")
+            print(f"   Summaries: {len(session.generated_summaries)}")
 
             # save to local file (if project_id available)
             project_id = session.meta.get("project_id")
@@ -827,11 +834,45 @@ class SessionManager:
                 except Exception as exc:
                     print(f"[SessionManager] ❌ Failed to export to file: {exc}")
 
-            # notify client
+            # notify client - save complete
             try:
-                await session.websocket.send_text(f"[save] Session saved successfully ({sentence_count} sentences, {char_count} chars)")
+                save_message = json.dumps({
+                    "status": "saved",
+                    "session_id": session.db_session_id,
+                    "duration": duration,
+                    "sentences": sentence_count,
+                    "characters": char_count,
+                    "summaries": len(session.generated_summaries)
+                })
+                await session.websocket.send_text(f"[save_complete] {save_message}")
+                print(f"[SessionManager] 📤 Sent [save_complete] to client")
             except Exception as exc:
-                print(f"[SessionManager] Failed to send save confirmation: {exc}")
+                print(f"[SessionManager] Failed to send save_complete: {exc}")
+            
+            # 🔧 ==================== 新增：触发索引 ====================
+            
+            # 检查是否有摘要需要索引
+            if session.db_session_id and len(session.generated_summaries) > 0:
+                print(f"\n📇 Triggering indexing for session {session.db_session_id}")
+                
+                # 发送索引开始通知到前端
+                try:
+                    await session.websocket.send_text("[indexing_start]")
+                    print("📤 Sent [indexing_start] to client")
+                except Exception as e:
+                    print(f"⚠️ Failed to send indexing_start: {e}")
+                
+                # 异步触发索引任务（不阻塞保存操作）
+                asyncio.create_task(
+                    self._index_session_async(session.db_session_id, session.websocket)
+                )
+            else:
+                if len(session.generated_summaries) == 0:
+                    print("ℹ️ No summaries to index")
+                else:
+                    print("⚠️ Cannot index: no db_session_id")
+            
+            # 🔧 ==================== 新增结束 ====================
             
         except Exception as exc:
             print(f"[SessionManager] ❌ Failed to save session to DB: {exc}")
@@ -843,6 +884,67 @@ class SessionManager:
             except:
                 pass
     
+    async def _index_session_async(self, db_session_id: int, websocket: WebSocket):
+        """
+        异步索引会话摘要
+        
+        Args:
+            db_session_id: 数据库 session ID
+            websocket: WebSocket 连接（用于发送完成通知）
+        """
+        try:
+            print(f"\n{'='*60}")
+            print(f"📇 Starting async indexing for session {db_session_id}")
+            print(f"{'='*60}\n")
+            
+            # 调用索引服务
+            result = await self.indexing_service.index_session_summaries(db_session_id)
+            
+            if result["success"]:
+                # 发送索引完成通知
+                message = json.dumps({
+                    "status": "completed",
+                    "session_id": db_session_id,
+                    "indexed_count": result.get("indexed", 0),
+                    "project_id": result.get("project_id")
+                })
+                
+                try:
+                    await websocket.send_text(f"[indexing_complete] {message}")
+                    print(f"📤 Sent [indexing_complete] to client")
+                    print(f"   Indexed: {result.get('indexed', 0)} summaries")
+                except Exception as e:
+                    print(f"⚠️ Failed to send indexing_complete: {e}")
+            else:
+                # 发送索引失败通知
+                error_message = json.dumps({
+                    "status": "failed",
+                    "session_id": db_session_id,
+                    "error": result.get("error", "Unknown error")
+                })
+                
+                try:
+                    await websocket.send_text(f"[indexing_error] {error_message}")
+                    print(f"❌ Indexing failed: {result.get('error')}")
+                except Exception as e:
+                    print(f"⚠️ Failed to send indexing_error: {e}")
+            
+        except Exception as e:
+            print(f"\n❌ Async indexing failed: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # 尝试发送错误通知
+            try:
+                error_message = json.dumps({
+                    "status": "failed",
+                    "session_id": db_session_id,
+                    "error": str(e)
+                })
+                await websocket.send_text(f"[indexing_error] {error_message}")
+            except:
+                pass
+            
     def _save_transcript_to_file(
         self,
         project_name: str,

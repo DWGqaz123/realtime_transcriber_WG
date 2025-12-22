@@ -283,7 +283,7 @@ class LogConfig:
     # ==================== 日志级别 ====================
     
     # 是否启用详细日志（开发模式）
-    VERBOSE: bool = False
+    VERBOSE: bool = True
     
     # 是否记录音频块日志
     LOG_AUDIO_CHUNKS: bool = False
