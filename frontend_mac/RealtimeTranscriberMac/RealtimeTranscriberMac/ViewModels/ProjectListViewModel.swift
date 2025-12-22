@@ -24,6 +24,7 @@ class ProjectListViewModel: ObservableObject {
     @Published var selectedSession: RecordingSession?  // 选中的 session
     @Published var showSessionDetail: Bool = false  // 是否显示详情浮窗
     @Published var sessionDetailLoading: Bool = false  // 加载详情中
+    private let baseURL = "http://localhost:8000"
     
     // MARK: - Private Properties
     
@@ -350,4 +351,91 @@ class ProjectListViewModel: ObservableObject {
             print("❌ Failed to refresh project: \(error.localizedDescription)")
         }
     }
+    
+    func loadSessions(for projectId: Int) async {
+        print("📡 Loading sessions for project \(projectId)...")
+        
+        guard let url = URL(string: "\(baseURL)/api/projects/\(projectId)/sessions") else {
+            print("❌ Invalid URL")
+            return
+        }
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                print("❌ Bad response")
+                return
+            }
+            
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            
+            let sessions = try decoder.decode([RecordingSession].self, from: data)
+            
+            await MainActor.run {
+                self.projectSessions[projectId] = sessions
+            }
+            
+            print("✅ Loaded \(sessions.count) sessions for project \(projectId)")
+            
+        } catch {
+            print("❌ Failed to load sessions: \(error)")
+        }
+    }
+    
+    /// 根据 ID 选择 session（用于搜索跳转）
+    func selectSessionById(projectId: Int, sessionId: Int) async {
+        print("🔍 Selecting session by ID: project=\(projectId), session=\(sessionId)")
+        
+        // 1. 确保项目已选中
+        if selectedProject?.id != projectId {
+            if let project = projects.first(where: { $0.id == projectId }) {
+                await MainActor.run {  // ✅ 已经有 await
+                    selectProject(project)
+                }
+            }
+        }
+        
+        // 2. 确保项目已展开
+        if !expandedProjects.contains(projectId) {
+            await MainActor.run {  // ✅ 已经有 await
+                expandedProjects.insert(projectId)
+            }
+        }
+        
+        // 3. 加载 sessions（如果还没加载）
+        if projectSessions[projectId] == nil {
+            await loadSessions(for: projectId)
+        }
+        
+        // 4. 查找并选择对应的 session
+        if let sessions = projectSessions[projectId],
+           let session = sessions.first(where: { $0.id == sessionId }) {
+            
+            await MainActor.run {  // ✅ 已经有 await
+                selectedSession = session
+                showSessionDetail = true
+            }
+            
+            print("✅ Session selected and detail opened")
+        } else {
+            print("⚠️ Session \(sessionId) not found in project \(projectId)")
+            
+            // 尝试强制重新加载
+            await loadSessions(for: projectId)
+            
+            if let sessions = projectSessions[projectId],
+               let session = sessions.first(where: { $0.id == sessionId }) {
+                await MainActor.run {  // ✅ 已经有 await
+                    selectedSession = session
+                    showSessionDetail = true
+                }
+                print("✅ Session found after reload")
+            }
+        }
+    }
 }
+
+

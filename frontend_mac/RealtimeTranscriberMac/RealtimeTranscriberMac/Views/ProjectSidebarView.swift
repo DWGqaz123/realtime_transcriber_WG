@@ -14,7 +14,8 @@ struct ProjectSidebarView: View {
     @State private var showDeleteSessionConfirmation = false
     @State private var sessionToDelete: (projectId: Int, session: RecordingSession)? = nil
     @State private var projectToDelete: Project? = nil
-    
+    @State private var showSearchSheet = false
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -25,6 +26,20 @@ struct ProjectSidebarView: View {
                 
                 Spacer()
                 
+                // 🔧 搜索按钮（仅在选中项目时显示）
+                if let project = viewModel.selectedProject {
+                    Button(action: {
+                        showSearchSheet = true
+                    }) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.blue)
+                            .font(.title3)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Search in project")
+                }
+                
+                // 🔧 创建项目按钮（始终显示）
                 Button(action: {
                     showCreateSheet = true
                 }) {
@@ -148,6 +163,27 @@ struct ProjectSidebarView: View {
                     .onAppear {
                         print("⚠️ Sheet opened but no session selected")
                     }
+            }
+        }
+        .sheet(isPresented: $showSearchSheet) {
+            if let project = viewModel.selectedProject {
+                SearchView(
+                    project: project,
+                    onSelectSession: { sessionId in  // 🔧 新增回调
+                        print("🔍 User selected session from search: \(sessionId)")
+                        
+                        // 关闭搜索界面
+                        showSearchSheet = false
+                        
+                        // 跳转到对应的 session
+                        Task {
+                            await viewModel.selectSessionById(
+                                projectId: project.id,
+                                sessionId: sessionId
+                            )
+                        }
+                    }
+                )
             }
         }
         .alert("Delete Project", isPresented: $showDeleteConfirmation) {
