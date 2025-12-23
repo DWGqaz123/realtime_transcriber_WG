@@ -92,7 +92,7 @@ struct RecordingView: View {
                 .background(Color.orange.opacity(0.1))
                 .cornerRadius(8)
             }
-
+            
             // Mode selector and status bar
             HStack {
                 Text("Mode:")
@@ -104,7 +104,7 @@ struct RecordingView: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 260)
                 .disabled(viewModel.isRecording)
-
+                
                 Spacer()
                 
                 // 麦克风权限状态
@@ -112,7 +112,7 @@ struct RecordingView: View {
                     .font(.caption)
                     .foregroundColor(viewModel.permissionStatus.contains("✅") ? .green : .orange)
             }
-
+            
             // Control bar with recording indicator
             HStack(spacing: 12) {
                 Button(action: {
@@ -161,7 +161,7 @@ struct RecordingView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
                 }
-
+                
                 // 录音状态指示器
                 if viewModel.isRecording {
                     HStack(spacing: 8) {
@@ -201,90 +201,90 @@ struct RecordingView: View {
                             .foregroundColor(.orange)
                     }
                 }
-
+                
                 Spacer()
             }
             
             // summary 生成进度
             if viewModel.isRecording && !viewModel.summaryGenerationProgress.isEmpty {
-                            HStack(spacing: 12) {
-                                // 进度文本
-                                Text(viewModel.summaryGenerationProgress)
-                                    .font(.system(size: 13))
-                                    .foregroundColor(viewModel.isGeneratingSummary ? .orange : .blue)
-                                
-                                Spacer()
-                                
-                                // 倒计时数字
-                                if !viewModel.isGeneratingSummary && viewModel.nextSummaryCountdown > 0 {
-                                    Text("\(viewModel.nextSummaryCountdown)s")
-                                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                        .foregroundColor(.secondary)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 4)
-                                        .background(Color.secondary.opacity(0.15))
-                                        .cornerRadius(8)
-                                }
-                                
-                                // 生成中的加载动画
-                                if viewModel.isGeneratingSummary {
-                                    ProgressView()
-                                        .scaleEffect(0.7)
-                                        .frame(width: 16, height: 16)
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(
-                                        viewModel.isGeneratingSummary
-                                            ? Color.orange.opacity(0.1)
-                                            : Color.blue.opacity(0.08)
-                                    )
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(
-                                        viewModel.isGeneratingSummary
-                                            ? Color.orange.opacity(0.3)
-                                            : Color.blue.opacity(0.2),
-                                        lineWidth: 1
-                                    )
-                            )
-                        }
-                        
-                        // 🔧 ==================== 可选：进度条（视觉化）====================
-                        if viewModel.isRecording && !viewModel.isGeneratingSummary && viewModel.nextSummaryCountdown > 0 {
-                            GeometryReader { geometry in
-                                ZStack(alignment: .leading) {
-                                    // 背景
-                                    Rectangle()
-                                        .fill(Color.secondary.opacity(0.15))
-                                        .frame(height: 3)
-                                        .cornerRadius(1.5)
-                                    
-                                    // 进度
-                                    Rectangle()
-                                        .fill(
-                                            LinearGradient(
-                                                gradient: Gradient(colors: [.blue, .purple]),
-                                                startPoint: .leading,
-                                                endPoint: .trailing
-                                            )
-                                        )
-                                        .frame(
-                                            width: geometry.size.width * CGFloat(30 - viewModel.nextSummaryCountdown) / 30.0,
-                                            height: 3
-                                        )
-                                        .cornerRadius(1.5)
-                                        .animation(.linear(duration: 0.5), value: viewModel.nextSummaryCountdown)
-                                }
-                            }
+                HStack(spacing: 12) {
+                    // 进度文本
+                    Text(viewModel.summaryGenerationProgress)
+                        .font(.system(size: 13))
+                        .foregroundColor(viewModel.isGeneratingSummary ? .orange : .blue)
+                    
+                    Spacer()
+                    
+                    // 倒计时数字
+                    if !viewModel.isGeneratingSummary && viewModel.nextSummaryCountdown > 0 {
+                        Text("\(viewModel.nextSummaryCountdown)s")
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.secondary.opacity(0.15))
+                            .cornerRadius(8)
+                    }
+                    
+                    // 生成中的加载动画
+                    if viewModel.isGeneratingSummary {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .frame(width: 16, height: 16)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(
+                            viewModel.isGeneratingSummary
+                            ? Color.orange.opacity(0.1)
+                            : Color.blue.opacity(0.08)
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(
+                            viewModel.isGeneratingSummary
+                            ? Color.orange.opacity(0.3)
+                            : Color.blue.opacity(0.2),
+                            lineWidth: 1
+                        )
+                )
+            }
+            
+            // 🔧 ==================== 可选：进度条（视觉化）====================
+            if viewModel.isRecording && !viewModel.isGeneratingSummary && viewModel.nextSummaryCountdown > 0 {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        // 背景
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.15))
                             .frame(height: 3)
-                            .padding(.horizontal, 16)
-                            .padding(.top, 4)
-                        }
+                            .cornerRadius(1.5)
+                        
+                        // 进度
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [.blue, .purple]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(
+                                width: geometry.size.width * CGFloat(30 - viewModel.nextSummaryCountdown) / 30.0,
+                                height: 3
+                            )
+                            .cornerRadius(1.5)
+                            .animation(.linear(duration: 0.5), value: viewModel.nextSummaryCountdown)
+                    }
+                }
+                .frame(height: 3)
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+            }
             
             
             
@@ -374,7 +374,7 @@ struct RecordingView: View {
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(8)
             }
-
+            
             // Current subtitle
             VStack(alignment: .leading, spacing: 8) {
                 Text("Current Subtitle")
@@ -407,7 +407,7 @@ struct RecordingView: View {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(viewModel.isRecording ? Color.blue : Color.gray.opacity(0.3), lineWidth: 2)
             )
-
+            
             // Full transcript
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -441,51 +441,77 @@ struct RecordingView: View {
                     }
                 }
                 
-                ScrollView {
-                    if viewModel.fullTranscript.isEmpty {
-                        VStack(spacing: 8) {
-                            Image(systemName: "text.bubble")
-                                .font(.system(size: 40))
-                                .foregroundColor(.gray.opacity(0.5))
-                            
-                            Text("Final transcripts will appear here...")
-                                .foregroundColor(.secondary)
-                            
-                            if viewModel.isRecording {
-                                Text("Keep speaking to see your transcriptions")
-                                    .font(.caption)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        if viewModel.fullTranscript.isEmpty {
+                            VStack(spacing: 8) {
+                                Image(systemName: "text.bubble")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.gray.opacity(0.5))
+                                
+                                Text("Final transcripts will appear here...")
                                     .foregroundColor(.secondary)
+                                
+                                if viewModel.isRecording {
+                                    Text("Keep speaking to see your transcriptions")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
+                        } else {
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(Array(viewModel.fullTranscript.components(separatedBy: "\n").enumerated()), id: \.offset) { index, sentence in
+                                    if !sentence.isEmpty {
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Text("\(index + 1).")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                                .frame(width: 30, alignment: .trailing)
+                                            
+                                            Text(sentence)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .textSelection(.enabled)
+                                        }
+                                        .padding(.vertical, 4)
+                                        .id(index)  // 🔧 给每一行添加 ID
+                                    }
+                                }
+                                
+                                // 🔧 底部锚点（不可见）
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("transcriptBottom")
+                            }
+                            .padding()
+                        }
+                    }
+                    .frame(minHeight: 200)
+                    .background(Color.gray.opacity(0.05))
+                    .cornerRadius(8)
+                    .onChange(of: viewModel.fullTranscript) { _ in
+                        // 🔧 转录内容变化时自动滚动到底部
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                proxy.scrollTo("transcriptBottom", anchor: .bottom)
                             }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
-                    } else {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(Array(viewModel.fullTranscript.components(separatedBy: "\n").enumerated()), id: \.offset) { index, sentence in
-                                if !sentence.isEmpty {
-                                    HStack(alignment: .top, spacing: 8) {
-                                        Text("\(index + 1).")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                            .frame(width: 30, alignment: .trailing)
-                                        
-                                        Text(sentence)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .textSelection(.enabled)
-                                    }
-                                    .padding(.vertical, 4)
+                    }
+                    .onAppear {
+                        // 🔧 首次加载时如果有内容，滚动到底部
+                        if !viewModel.fullTranscript.isEmpty {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                withAnimation(.easeOut(duration: 0.3)) {
+                                    proxy.scrollTo("transcriptBottom", anchor: .bottom)
                                 }
                             }
                         }
-                        .padding()
                     }
                 }
-                .frame(minHeight: 200)
-                .background(Color.gray.opacity(0.05))
-                .cornerRadius(8)
+                
+                Spacer()
             }
-
-            Spacer()
         }
         .padding()
         .frame(minWidth: 600, minHeight: 600)

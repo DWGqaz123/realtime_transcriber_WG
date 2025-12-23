@@ -6,7 +6,6 @@
 //
 //  智能摘要卡片视图
 //
-
 import SwiftUI
 
 struct SummaryCardView: View {
@@ -17,25 +16,43 @@ struct SummaryCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             HStack {
-                Image(systemName: "sparkles")
-                    .foregroundColor(.orange)
+                // 🔧 最终摘要使用特殊图标
+                Image(systemName: summary.isFinal ? "flag.fill" : "sparkles")
+                    .foregroundColor(summary.isFinal ? .orange : .orange)
                     .font(.caption)
                 
                 Text(summary.formattedTime)
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
+                // 🔧 最终摘要徽章
+                if summary.isFinal {
+                    HStack(spacing: 4) {
+                        Text("Final Summary")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.orange.opacity(0.2))
+                    .cornerRadius(6)
+                }
+                
                 Spacer()
                 
-                // Metadata
-                HStack(spacing: 8) {
-                    Label("\(summary.sentenceCount)", systemImage: "text.quote")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    
-                    Label(summary.formattedDuration, systemImage: "clock")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                // Metadata（只在非最终摘要或有数据时显示）
+                if let sentenceCount = summary.sentenceCount,
+                   let duration = summary.duration {
+                    HStack(spacing: 8) {
+                        Label("\(sentenceCount)", systemImage: "text.quote")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        
+                        Label(summary.formattedDuration, systemImage: "clock")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 // Expand/Collapse button
@@ -52,7 +69,12 @@ struct SummaryCardView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.orange.opacity(0.1))
+            .background(
+                // 🔧 最终摘要使用更显眼的背景
+                summary.isFinal
+                    ? Color.orange.opacity(0.15)
+                    : Color.orange.opacity(0.1)
+            )
             
             // Content
             if isExpanded {
@@ -79,9 +101,20 @@ struct SummaryCardView: View {
         .cornerRadius(8)
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                .stroke(
+                    // 🔧 最终摘要使用更显眼的边框
+                    summary.isFinal
+                        ? Color.orange.opacity(0.5)
+                        : Color.orange.opacity(0.3),
+                    lineWidth: summary.isFinal ? 1.5 : 1
+                )
         )
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .shadow(
+            color: Color.black.opacity(summary.isFinal ? 0.1 : 0.05),
+            radius: summary.isFinal ? 4 : 2,
+            x: 0,
+            y: summary.isFinal ? 2 : 1
+        )
     }
     
     // 解析 Markdown 格式的项目符号
@@ -113,27 +146,48 @@ struct SummaryCardView: View {
 
 #Preview {
     VStack(spacing: 12) {
+        // 🔧 最终摘要预览
         SummaryCardView(summary: Summary(
+            id: 1,
+            content: """
+            - 本次讨论涵盖了机器学习的基础概念和实际应用
+            - 详细介绍了监督学习、无监督学习和强化学习三大类别
+            - 深入分析了深度学习在图像识别和自然语言处理中的应用
+            - 讨论了迁移学习如何加速模型训练过程
+            - 总结了当前AI领域的主要挑战和未来发展方向
+            """,
+            created_at: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-300)),
+            is_final: true,  // 🔧 最终摘要
+            sentenceCount: nil,
+            duration: nil
+        ))
+        
+        // 常规摘要预览
+        SummaryCardView(summary: Summary(
+            id: 2,
             content: """
             - 机器学习是人工智能的一个重要分支，让计算机能够从数据中自动学习
             - 监督学习需要标注数据，而无监督学习则不需要标签
             - 深度学习通过多层神经网络实现复杂的特征提取
             """,
-            timestamp: Date().addingTimeInterval(-300),
+            created_at: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-600)),
+            is_final: false,  // 🔧 常规摘要
             sentenceCount: 8,
             duration: 300
         ))
         
         SummaryCardView(summary: Summary(
+            id: 3,
             content: """
             - 强化学习通过奖励机制训练智能体
             - 迁移学习可以利用预训练模型加速训练过程
             """,
-            timestamp: Date().addingTimeInterval(-600),
+            created_at: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-900)),
+            is_final: false,
             sentenceCount: 5,
             duration: 280
         ))
     }
     .padding()
-    .frame(width: 350)
+    .frame(width: 400)
 }

@@ -48,6 +48,7 @@ class LiveSession:
     sentence_count_since_last: int = 0
     summary_sentence_start_idx: int = 0
     generated_summaries: List[int] = field(default_factory=list)
+    next_start_sentence_idx: int = 0
     
     # ==================== 会话状态 ====================
     is_active: bool = True
@@ -94,8 +95,10 @@ class SessionManager:
         self.run_logger = run_logger
         self._api_key = api_key or os.getenv("ELEVENLABS_API_KEY", "")
 
-        self.summary_service: Optional[SummaryService] = None
         self.indexing_service = get_indexing_service()
+        # self.summary_service: Optional[SummaryService] = None
+        from summary_service import SummaryService
+        self.summary_service = SummaryService()
         
         print("✨ SessionManager initialized")
         print(f"   Run logger: {'enabled' if run_logger else 'disabled'}")
@@ -317,227 +320,172 @@ class SessionManager:
         """
         return "\n".join(snapshot)
     
-    async def _generate_and_send_summary(self, session: LiveSession):
+    async def _generate_and_send_summary(self, session: LiveSession) -> None:
         """
-        生成并发送摘要
+        Phase 2 版本：生成摘要的核心方法
         
-        Phase 3: 使用双容器架构和原子转移
-        
-        流程：
-        1. 原子转移：从 ingestion_buffer 复制到 processing_snapshot
-        2. 使用 processing_snapshot 生成摘要（不阻塞新数据接收）
-        3. 保存到数据库
-        4. 发送到前端
-        5. 更新上下文缓存
-        6. 释放生成锁
+        Args:
+            session: LiveSession 对象
         """
-        session_id = session.id
-        # 🔧 发送摘要开始信号给前端
-        try:
-            await session.websocket.send_text("[summary_start]")
-            if LogConfig.LOG_SUMMARY:
-                print("📤 Sent summary_start signal to client")
-        except Exception as e:
-            print(f"⚠️ Failed to send summary_start: {e}")
-            
-        if LogConfig.LOG_SUMMARY:
-            print(f"\n{'='*60}")
-            print(f"🤖 SUMMARY GENERATION START")
-            print(f"   Session: {session_id}")
-            print(f"   DB Session: {session.db_session_id}")
-            print(f"{'='*60}\n")
         
-        # ==================== Step 1: 原子转移 ====================
+        session_id = session.id  # 🔧 从 session 对象获取 session_id
         
-        try:
-            snapshot = self._atomic_transfer(session)
-            
-            if not snapshot:
-                print("⚠️ Processing snapshot is empty after transfer")
-                session.is_generating = False
-                return
-            
-            if LogConfig.LOG_SUMMARY:
-                print(f"📸 Snapshot captured: {len(snapshot)} sentences")
-            
-        except Exception as e:
-            print(f"❌ Atomic transfer failed: {e}")
-            import traceback
-            traceback.print_exc()
+        print(f"\n{'='*60}")
+        print(f"🤖 SUMMARY GENERATION START")
+        print(f"   Session: {session_id}")
+        print(f"   DB Session: {session.db_session_id}")
+        print(f"{'='*60}\n")
+        
+        # ==================== Phase 1: 原子转移 ====================
+        print(f"\n{'='*60}")
+        print(f"⚡ ATOMIC TRANSFER START")
+        print(f"{'='*60}")
+        
+        start_time = time.time()
+        
+        # 🔒 原子操作：转移数据
+        snapshot = session.ingestion_buffer.copy()
+        session.ingestion_buffer.clear()
+        session.processing_snapshot = snapshot
+        session.is_generating = True
+        
+        end_time = time.time()
+        elapsed = (end_time - start_time) * 1000  # 转换为毫秒
+        
+        print(f"✅ ATOMIC TRANSFER COMPLETE")
+        print(f"   Snapshot size: {len(snapshot)} sentences")
+        print(f"   Buffer cleared: {len(session.ingestion_buffer)} remaining")
+        print(f"   Is generating: {session.is_generating}")
+        print(f"   Time elapsed: {elapsed:.3f}ms")
+        print(f"{'='*60}\n")
+        
+        if not snapshot:
+            print(f"⚠️  Empty snapshot, aborting summary generation")
             session.is_generating = False
             return
         
-        # ==================== Step 2: 准备上下文和内容 ====================
+        # ==================== Phase 2: 准备上下文和内容 ====================
+        print(f"📸 Snapshot captured: {len(snapshot)} sentences")
         
+        context = "\n".join(session.context_cache)
+        current_text = "\n".join(snapshot)
+        
+        print(f"📝 Prepared content:")
+        print(f"   Context: {len(context)} chars ({len(session.context_cache)} sentences)")
+        print(f"   Current: {len(current_text)} chars ({len(snapshot)} sentences)")
+        
+        if context:
+            print(f"   Context preview: {context[:100]}...")
+        print(f"   Current preview: {current_text[:100]}...")
+        
+        # ==================== Phase 3: 调用 SummaryService ====================
         try:
-            # 获取上下文（上一次摘要的最后几句）
-            context = self._format_context_for_prompt(session)
-            
-            # 格式化当前快照
-            buffer_text = self._format_snapshot_for_prompt(snapshot)
-            
-            if LogConfig.LOG_SUMMARY:
-                print(f"📝 Prepared content:")
-                print(f"   Context: {len(context)} chars ({len(session.context_cache)} sentences)")
-                print(f"   Current: {len(buffer_text)} chars ({len(snapshot)} sentences)")
-                
-                if context:
-                    print(f"   Context preview: '{context[:80]}{'...' if len(context) > 80 else ''}'")
-                
-                print(f"   Current preview: '{buffer_text[:80]}{'...' if len(buffer_text) > 80 else ''}'")
-            
-        except Exception as e:
-            print(f"❌ Failed to prepare content: {e}")
-            import traceback
-            traceback.print_exc()
-            session.is_generating = False
-            return
-        
-        # ==================== Step 3: 调用 LLM 生成摘要 ====================
-        
-        try:
-            # 获取摘要服务
-            if self.summary_service is None:
-                from summary_service import get_summary_service
-                self.summary_service = get_summary_service()
-            
-            # 获取会话模式
             mode = session.meta.get("mode", "lecture")
             
-            if LogConfig.LOG_SUMMARY:
-                print(f"🤖 Calling OpenAI API...")
-                print(f"   Mode: {mode}")
-                print(f"   Model: {self.summary_service.model}")
+            print(f"🤖 Calling OpenAI API...")
+            print(f"   Mode: {mode}")
+            print(f"   Model: gpt-4-turbo")
             
-            # 调用 LLM 生成摘要
+            print(f"\n{'='*60}")
+            print(f"🤖 Generating summary with OpenAI API")
+            print(f"   Model: gpt-4-turbo")
+            print(f"   Input length: {len(current_text)} chars")
+            print(f"{'='*60}\n")
+            
             summary_content = await self.summary_service.generate_summary(
-                buffer_text=buffer_text,
+                buffer_text=current_text,
                 context=context,
                 mode=mode
             )
             
             if not summary_content:
-                print("⚠️ LLM returned empty summary")
-                session.is_generating = False
+                print(f"⚠️  Empty summary from OpenAI, aborting")
+                self._cleanup_after_summary(session, snapshot)
                 return
             
-            if LogConfig.LOG_SUMMARY:
-                print(f"✅ Summary generated successfully")
-                print(f"   Length: {len(summary_content)} chars")
-                print(f"   Preview: {summary_content[:100]}{'...' if len(summary_content) > 100 else ''}")
+            print(f"✅ Summary generated successfully")
+            print(f"   Output length: {len(summary_content)} chars")
+            print(f"   Preview: {summary_content[:150]}...")
             
         except Exception as e:
-            print(f"❌ LLM generation failed: {e}")
+            print(f"❌ Summary generation failed: {e}")
             import traceback
             traceback.print_exc()
-            session.is_generating = False
+            self._cleanup_after_summary(session, snapshot)
             return
         
-        # ==================== Step 4: 保存到数据库 ====================
-        
-        summary_id = None
-        
-        try:
-            if session.db_session_id:
+        # ==================== Phase 4: 保存到数据库 ====================
+        if session.db_session_id:
+            try:
                 from database.db import DatabaseManager
                 
-                # 🔧 获取并验证 project_id
                 project_id = session.meta.get("project_id")
+                start_idx = session.next_start_sentence_idx
+                end_idx = start_idx + len(snapshot)
                 
-                if project_id is None:
-                    print("⚠️ No project_id in session.meta, cannot save summary to database")
-                    if LogConfig.VERBOSE:
-                        print(f"   Session meta: {session.meta}")
-                    # 不 return，继续发送给前端
-                else:
-                    # 计算时长
-                    duration = int(time.time() - session.last_summary_time)
+                duration = int(time.time() - session.last_summary_time)
+                source_text = current_text[:500]  # 保存前500字符作为来源
+                
+                summary = DatabaseManager.create_summary(
+                    session_id=session.db_session_id,
+                    project_id=project_id,
+                    content=summary_content,
+                    source_text=source_text,
+                    start_sentence_idx=start_idx,
+                    end_sentence_idx=end_idx,
+                    duration_seconds=duration
+                )
+                
+                session.generated_summaries.append(summary.id)
+                
+                print(f"✅ [DB] Created summary: id={summary.id}, session={session.db_session_id}")
+                print(f"✅ [DB] Saved summary: id={summary.id}")
+                print(f"   Duration: {duration}s")
+                print(f"   Sentences: {start_idx} → {end_idx}")
+                
+                # 🔧 ==================== 发送给前端（修改这里）====================
+                try:
+                    summary_data = {
+                        "id": summary.id,  # 🔧 添加数据库 ID
+                        "content": summary_content,
+                        "created_at": summary.created_at.isoformat() if summary.created_at else datetime.now().isoformat(),  # 🔧 添加创建时间
+                        "is_final": False,  # 🔧 标记为常规摘要
+                        "sentence_count": len(snapshot),  # 兼容字段
+                        "duration": duration  # 兼容字段
+                    }
                     
-                    # 保存到数据库
-                    summary = DatabaseManager.create_summary(
-                        session_id=session.db_session_id,
-                        project_id=project_id,  # ✅ 已验证非 None
-                        content=summary_content,
-                        source_text=buffer_text,
-                        start_sentence_idx=session.summary_sentence_start_idx,
-                        end_sentence_idx=len(session.transcript_parts) - 1,
-                        duration_seconds=duration
+                    # 🔧 详细日志
+                    print(f"📤 Sending summary to client:")
+                    print(f"   ID: {summary_data['id']}")
+                    print(f"   Is Final: {summary_data['is_final']}")
+                    print(f"   Created At: {summary_data['created_at']}")
+                    print(f"   Content length: {len(summary_data['content'])} chars")
+                    print(f"   JSON preview: {json.dumps(summary_data)[:200]}...")
+                    
+                    await session.websocket.send_text(
+                        f"[summary] {json.dumps(summary_data)}"
                     )
                     
-                    summary_id = int(summary.id)  # 🔧 显式转换为 int
-                    session.generated_summaries.append(summary_id)
+                    print(f"📤 Sent summary to client")
                     
-                    if LogConfig.LOG_DATABASE:
-                        print(f"✅ [DB] Saved summary: id={summary_id}")
-                        print(f"   Duration: {duration}s")
-                        print(f"   Sentences: {session.summary_sentence_start_idx} → {len(session.transcript_parts) - 1}")
-            else:
-                if LogConfig.VERBOSE:
-                    print("⚠️ No db_session_id, skipping database save")
+                except Exception as e:
+                    print(f"⚠️ Failed to send summary to client: {e}")
+                # 🔧 ==================== 发送结束 ====================
                 
-        except Exception as e:
-            print(f"❌ Database save failed: {e}")
-            import traceback
-            traceback.print_exc()
-            # 继续执行，至少要发送给前端
+            except Exception as e:
+                print(f"❌ Database save failed: {e}")
+                import traceback
+                traceback.print_exc()
         
-        # ==================== Step 5: 发送到前端 ====================
+        # ==================== Phase 5: 更新上下文缓存 ====================
+        self._update_context_cache(session, snapshot)
         
-        try:
-            import json
-            from datetime import datetime
-            
-            # 构建消息
-            message = json.dumps({
-                "content": summary_content,
-                "timestamp": datetime.utcnow().isoformat(),
-                "sentence_count": len(snapshot),
-                "duration": int(time.time() - session.last_summary_time)
-            })
-            
-            # 发送 WebSocket 消息
-            await session.websocket.send_text(f"[summary] {message}")
-            
-            if LogConfig.LOG_SUMMARY:
-                print(f"📤 Sent summary to client")
-            
-        except Exception as e:
-            print(f"❌ Failed to send to client: {e}")
-            import traceback
-            traceback.print_exc()
+        # ==================== Phase 6: 清理状态 ====================
+        self._cleanup_after_summary(session, snapshot)
         
-        # ==================== Step 6: 更新状态 ====================
-        
-        try:
-            # 更新上下文缓存（保留快照的最后 N 句）
-            self._update_context_cache(session, snapshot)
-            
-            # 更新句子起始索引
-            session.summary_sentence_start_idx = len(session.transcript_parts)
-            
-            # 清空处理快照（已处理完成）
-            session.processing_snapshot.clear()
-            
-            # 释放生成锁
-            session.is_generating = False
-            
-            if LogConfig.LOG_SUMMARY:
-                print(f"✅ State updated:")
-                print(f"   Context cache: {len(session.context_cache)} sentences")
-                print(f"   Next start index: {session.summary_sentence_start_idx}")
-                print(f"   Is generating: {session.is_generating}")
-                print(f"   Generated summaries: {len(session.generated_summaries)}")
-            
-        except Exception as e:
-            print(f"❌ State update failed: {e}")
-            import traceback
-            traceback.print_exc()
-            session.is_generating = False  # 确保锁被释放
-        
-        if LogConfig.LOG_SUMMARY:
-            print(f"\n{'='*60}")
-            print(f"✅ SUMMARY GENERATION COMPLETE")
-            print(f"{'='*60}\n")
+        print(f"\n{'='*60}")
+        print(f"✅ SUMMARY GENERATION COMPLETE")
+        print(f"{'='*60}\n")
         
     def _build_elevenlabs_config_for_mode(self, mode: str) -> ElevenLabsConfig:
         """
@@ -1108,7 +1056,7 @@ class SessionManager:
         stripped = text.strip()
         
         # ==================== PROJECT_ID Configuration ====================
-        # 🔧 修复：使用 PROJECT_ID 而不是 PROJECT
+        # 使用 PROJECT_ID 
         if stripped.upper().startswith("PROJECT_ID:"):
             try:
                 project_id_str = stripped.split(":", 1)[1].strip()
@@ -1291,24 +1239,62 @@ class SessionManager:
 
         # ==================== STOP Signal ====================
         if stripped.upper() == "STOP":
-            print(f"[SessionManager] Received STOP signal from {session_id}")
-            
-            if session.manual_commit_task is not None:
-                session.manual_commit_task.cancel()
-                session.manual_commit_task = None
-                print(f"[SessionManager] Cancelled manual commit task for {session_id}")
-            
-            if session.eleven_client is not None:
-                await session.eleven_client.close()
-                session.eleven_client = None
-                print(f"[SessionManager] Closed ElevenLabs client for {session_id}")
-                
-            try:
-                await session.websocket.send_text("[config] recording stopped, session kept alive")
-            except Exception as exc:
-                print(f"[SessionManager] Failed to send stop acknowledgment: {exc}")
+                    print(f"[SessionManager] Received STOP signal from {session_id}")
+                    
+                    # 🔧 ==================== Step 1: 生成最终摘要 ====================
+                    
+                    # 检查是否有转录内容
+                    full_transcript = "\n".join(session.transcript_parts)
+                    
+                    if full_transcript and len(full_transcript.strip()) > 20 and session.db_session_id is not None:
+                        print(f"\n{'='*60}")
+                        print(f"🏁 GENERATING FINAL SUMMARY")
+                        print(f"   Session: {session_id}")
+                        print(f"   Total sentences: {len(session.transcript_parts)}")
+                        print(f"   Total characters: {len(full_transcript)}")
+                        print(f"{'='*60}\n")
+                        
+                        # 发送最终摘要开始信号
+                        try:
+                            await session.websocket.send_text("[final_summary_start]")
+                        except Exception as e:
+                            print(f"⚠️ Failed to send final_summary_start: {e}")
+                        
+                        # 生成最终摘要
+                        try:
+                            await self._generate_final_summary(session)
+                        except Exception as e:
+                            print(f"❌ Failed to generate final summary: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    else:
+                        if len(full_transcript.strip()) <= 20:
+                            print(f"ℹ️  Transcript too short for final summary ({len(full_transcript)} chars)")
+                        elif session.db_session_id is None:
+                            print(f"ℹ️  No database session, skipping final summary")
+                    
+                    # 🔧 ==================== Step 2: 清理资源 ====================
+                    
+                    # 取消手动提交任务
+                    if session.manual_commit_task is not None:
+                        session.manual_commit_task.cancel()
+                        session.manual_commit_task = None
+                        print(f"[SessionManager] Cancelled manual commit task for {session_id}")
+                    
+                    # 关闭 ElevenLabs 客户端
+                    if session.eleven_client is not None:
+                        await session.eleven_client.close()
+                        session.eleven_client = None
+                        print(f"[SessionManager] Closed ElevenLabs client for {session_id}")
+                    
+                    # 🔧 ==================== Step 3: 发送确认消息 ====================
+                    
+                    try:
+                        await session.websocket.send_text("[config] recording stopped, session kept alive")
+                    except Exception as exc:
+                        print(f"[SessionManager] Failed to send stop acknowledgment: {exc}")
 
-            return
+                    return
         
         # ==================== SAVE Signal ====================
         if stripped.upper() == "SAVE":
@@ -1331,6 +1317,101 @@ class SessionManager:
                 {"type": "text_echo", "received": text, "sent": echo_text}
             )
     
+    async def _generate_final_summary(self, session: LiveSession) -> None:
+        """
+        生成最终摘要（Stop 时调用）
+        
+        使用完整的 full transcript 生成一个总结性摘要
+        
+        Args:
+            session: LiveSession 对象
+        """
+        try:
+            # 🔧 获取完整转录
+            full_transcript = "\n".join(session.transcript_parts)
+            
+            if not full_transcript or len(full_transcript.strip()) < 20:
+                print(f"⚠️  Transcript too short, skipping final summary")
+                return
+            
+            print(f"📝 Generating final summary from full transcript")
+            print(f"   Total sentences: {len(session.transcript_parts)}")
+            print(f"   Total characters: {len(full_transcript)}")
+            
+            # 🔧 获取模式
+            mode = session.meta.get("mode", "discussion")
+            
+            print(f"🤖 Calling SummaryService for final summary...")
+            print(f"   Mode: {mode}")
+            
+            # 🔧 调用 SummaryService 生成摘要
+            from summary_service import SummaryService
+            summary_service = SummaryService()
+            
+            # 🔧 使用实际的方法签名
+            summary_content = await summary_service.generate_summary(
+                buffer_text=full_transcript,  # 🔧 使用 buffer_text 参数
+                context="",  # 🔧 最终摘要不需要上下文
+                mode=mode
+            )
+            
+            if not summary_content or len(summary_content.strip()) == 0:
+                print(f"⚠️  Empty summary generated, skipping")
+                return
+            
+            print(f"✅ Final summary generated successfully")
+            print(f"   Output length: {len(summary_content)} chars")
+            print(f"   Preview: {summary_content[:150]}...")
+            
+            # 🔧 保存到数据库
+            if session.db_session_id:
+                try:
+                    from database.db import DatabaseManager
+                    
+                    project_id = session.meta.get("project_id")
+                    
+                    summary = DatabaseManager.create_summary(
+                        session_id=session.db_session_id,
+                        project_id=project_id,
+                        content=summary_content,
+                        source_text=full_transcript[:1000],  # 保存前1000字符作为来源
+                        start_sentence_idx=0,
+                        end_sentence_idx=len(session.transcript_parts),
+                        duration_seconds=int(time.time() - session.start_time) if hasattr(session, 'start_time') else 0
+                    )
+                    
+                    print(f"✅ [DB] Saved final summary: id={summary.id}, session={session.db_session_id}")
+                    
+                    # 🔧 发送给前端
+                    try:
+                        summary_data = {
+                            "id": summary.id,
+                            "content": summary_content,
+                            "created_at": summary.created_at.isoformat() if summary.created_at else "",
+                            "is_final": True  # 🔧 标记为最终摘要
+                        }
+                        
+                        await session.websocket.send_text(
+                            f"[summary] {json.dumps(summary_data)}"
+                        )
+                        
+                        print(f"📤 Sent final summary to client")
+                        
+                    except Exception as e:
+                        print(f"⚠️ Failed to send final summary to client: {e}")
+                    
+                except Exception as e:
+                    print(f"❌ Failed to save final summary to database: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"⚠️ No database session ID, cannot save final summary")
+            
+        except Exception as e:
+            print(f"❌ Error in _generate_final_summary: {e}")
+            import traceback
+            traceback.print_exc()
+            
     async def push_transcript_to_client(
         self,
         session_id: str,
@@ -1465,5 +1546,26 @@ class SessionManager:
         except Exception as exc:
             print(f"[SessionManager] Unexpected error in manual commit loop: {exc}")
             
-    
+    def _cleanup_after_summary(self, session: LiveSession, snapshot: List[str]) -> None:
+        """
+        清理摘要生成后的状态
+        
+        Args:
+            session: LiveSession 对象
+            snapshot: 刚处理的句子快照
+        """
+        # 清空 processing_snapshot
+        session.processing_snapshot.clear()
+        
+        # 重置生成状态
+        session.is_generating = False
+        
+        # 更新最后生成摘要的时间
+        session.last_summary_time = time.time()
+        
+        print(f"✅ State updated:")
+        print(f"   Context cache: {len(session.context_cache)} sentences")
+        print(f"   Next start index: {session.next_start_sentence_idx}")
+        print(f"   Is generating: {session.is_generating}")
+        print(f"   Generated summaries: {len(session.generated_summaries)}")
    

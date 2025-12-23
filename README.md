@@ -51,7 +51,7 @@ One of the core engineering challenges was handling the race condition between t
 graph TD
     WS[WebSocket Stream] -->|Push Text| IB[📥 Ingestion Buffer]
     
-    subgraph "Atomic Transfer (Micro-second)"
+    subgraph "Atomic Transfer"
         IB -->|Cut & Move| PS[📸 Processing Snapshot]
     end
     

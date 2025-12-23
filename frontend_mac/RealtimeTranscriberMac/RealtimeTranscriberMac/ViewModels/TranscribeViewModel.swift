@@ -313,24 +313,14 @@ final class TranscribeViewModel: ObservableObject {
             }
             self.fullTranscript += content
             
-        }else if text.hasPrefix("[indexing_start]") {
+        } else if text.hasPrefix("[indexing_start]") {
             // 🔧 索引开始
             print("📇 Indexing started")
-            // 可选：显示索引进度
-            // self.currentSubtitle = "Indexing summaries..."
             
         } else if text.hasPrefix("[indexing_complete]") {
             // 🔧 索引完成
             let jsonString = text.replacingOccurrences(of: "[indexing_complete] ", with: "")
             print("✅ Indexing complete: \(jsonString)")
-            
-            // 可选：显示完成提示
-            // self.currentSubtitle = "✨ Summaries indexed!"
-            // DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            //     if self.currentSubtitle == "✨ Summaries indexed!" {
-            //         self.currentSubtitle = ""
-            //     }
-            // }
             
         } else if text.hasPrefix("[indexing_error]") {
             // 🔧 索引失败
@@ -366,21 +356,27 @@ final class TranscribeViewModel: ObservableObject {
             }
             
         } else if text.hasPrefix("[summary_start]") {
-            // 🔧 新增：处理摘要开始信号
+            // 🔧 常规摘要开始信号
             self.isGeneratingSummary = true
             self.summaryGenerationProgress = "🤖 Generating summary..."
             print("🤖 Summary generation started")
             
+        } else if text.hasPrefix("[final_summary_start]") {
+            // 🔧 新增：最终摘要开始信号
+            self.isGeneratingSummary = true
+            self.summaryGenerationProgress = "🏁 Generating final summary of entire recording..."
+            print("🏁 Final summary generation started")
+            
         } else if text.hasPrefix("[summary]") {
             // 处理摘要消息
             let jsonString = text.replacingOccurrences(of: "[summary] ", with: "")
-            print("📝 Received summary: \(jsonString.prefix(100))...")
+            print("📝 Received summary JSON: \(jsonString.prefix(100))...")
             
             do {
                 let jsonData = jsonString.data(using: .utf8)!
                 let decoder = JSONDecoder()
                 
-                // 使用自定义日期解码策略
+                // 🔧 修改：使用更简单的日期解码策略
                 decoder.dateDecodingStrategy = .custom { decoder in
                     let container = try decoder.singleValueContainer()
                     let dateString = try container.decode(String.self)
@@ -420,25 +416,39 @@ final class TranscribeViewModel: ObservableObject {
                 
                 let summary = try decoder.decode(Summary.self, from: jsonData)
                 
+                // 🔧 检查是否是最终摘要
+                let isFinal = summary.isFinal
+                
+                print("✅ Decoded summary successfully!")
+                print("   ID: \(summary.id)")
+                print("   Is Final: \(isFinal)")
+                print("   Content length: \(summary.content.count) chars")
+                
                 // 🔧 标记生成完成
                 self.isGeneratingSummary = false
                 
-                // 添加到列表
+                // 添加到列表（最新的在前面）
                 self.summaries.insert(summary, at: 0)
+                
+                print("📝 Summary added to list, total: \(self.summaries.count)")
                 
                 // 🔧 重置倒计时
                 self.resetSummaryCountdown()
                 
-                print("✅ Summary added successfully!")
-                print("   ID: \(summary.id)")
-                print("   Content length: \(summary.content.count) chars")
-                print("   Total summaries: \(self.summaries.count)")
+                // 🔧 根据是否是最终摘要显示不同提示
+                if isFinal {
+                    // 最终摘要的特殊提示
+                    self.currentSubtitle = "🏁 Final summary generated!"
+                    print("🏁 Final summary received and displayed")
+                } else {
+                    // 常规摘要提示
+                    self.currentSubtitle = "✨ New summary generated!"
+                    print("✨ Regular summary received and displayed")
+                }
                 
-                // 🔧 显示临时提示（3秒后消失）
-                self.currentSubtitle = "✨ New summary generated!"
-                
+                // 3秒后清除提示
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                    if self.currentSubtitle == "✨ New summary generated!" {
+                    if self.currentSubtitle.contains("summary generated") {
                         self.currentSubtitle = ""
                     }
                 }
@@ -455,6 +465,7 @@ final class TranscribeViewModel: ObservableObject {
                 print("❌ Decoding error - key not found:")
                 print("   Key: \(key)")
                 print("   \(context.debugDescription)")
+                print("   JSON: \(jsonString)")
                 
                 // 🔧 错误时也标记生成完成
                 self.isGeneratingSummary = false

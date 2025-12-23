@@ -81,16 +81,54 @@ class ElevenLabsRealtimeClient:
         url = "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe"
         headers = {"xi-api-key": self.api_key}
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
+        # 🔧 添加详细日志
+        print(f"\n{'='*60}")
+        print(f"🔑 Fetching ElevenLabs single-use token")
+        print(f"   URL: {url}")
+        print(f"   API Key: {self.api_key[:10]}...{self.api_key[-4:]}")
+        print(f"   Mode: {self.config.mode if hasattr(self.config, 'mode') else 'N/A'}")
+        print(f"   Commit Strategy: {self.config.commit_strategy}")
+        print(f"{'='*60}\n")
 
-        token = data.get("token")
-        if not token:
-            raise RuntimeError("Failed to obtain single-use token from ElevenLabs")
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                print(f"📡 Sending POST request to ElevenLabs...")
+                resp = await client.post(url, headers=headers)
+                
+                print(f"📡 Response status: {resp.status_code}")
+                
+                if resp.status_code != 200:
+                    error_text = resp.text
+                    print(f"❌ API Error Response:")
+                    print(f"   Status: {resp.status_code}")
+                    print(f"   Body: {error_text}")
+                    resp.raise_for_status()  # 抛出异常
+                
+                data = resp.json()
+                print(f"✅ Response data: {data}")
 
-        return token
+            token = data.get("token")
+            if not token:
+                print(f"❌ No token in response!")
+                print(f"   Response data: {data}")
+                raise RuntimeError("Failed to obtain single-use token from ElevenLabs")
+
+            print(f"✅ Got token: {token[:20]}...{token[-10:]}")
+            return token
+            
+        except httpx.HTTPStatusError as e:
+            print(f"❌ HTTP Error: {e}")
+            print(f"   Status: {e.response.status_code}")
+            print(f"   Body: {e.response.text}")
+            raise
+        except httpx.RequestError as e:
+            print(f"❌ Request Error: {e}")
+            raise
+        except Exception as e:
+            print(f"❌ Unexpected Error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     async def connect(self) -> None:
         """

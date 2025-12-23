@@ -9,34 +9,26 @@
 import Foundation
 
 struct Summary: Identifiable, Codable, Hashable {
-    let id: UUID
+    let id: Int                  // 🔧 改为 Int（来自后端数据库 ID）
     let content: String          // Markdown 格式的摘要内容
-    let timestamp: Date          // 生成时间
-    let sentenceCount: Int       // 覆盖的句子数
-    let duration: Int            // 覆盖的时长（秒）
+    let created_at: String       // 🔧 后端返回的 ISO 8601 时间字符串
+    let is_final: Bool?          // 🔧 新增：是否是最终摘要
     
-    // 本地生成的 ID（因为后端消息没有 ID）
-    init(content: String, timestamp: Date, sentenceCount: Int, duration: Int) {
-        self.id = UUID()
-        self.content = content
-        self.timestamp = timestamp
-        self.sentenceCount = sentenceCount
-        self.duration = duration
-    }
+    // 🔧 兼容旧字段（可选）
+    let sentenceCount: Int?
+    let duration: Int?
     
-    // 从 JSON 解码
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = UUID()
-        self.content = try container.decode(String.self, forKey: .content)
-        self.timestamp = try container.decode(Date.self, forKey: .timestamp)
-        self.sentenceCount = try container.decode(Int.self, forKey: .sentenceCount)
-        self.duration = try container.decode(Int.self, forKey: .duration)
+    // 计算属性：解析时间
+    var timestamp: Date {
+        let formatter = ISO8601DateFormatter()
+        return formatter.date(from: created_at) ?? Date()
     }
     
     enum CodingKeys: String, CodingKey {
+        case id
         case content
-        case timestamp
+        case created_at
+        case is_final
         case sentenceCount = "sentence_count"
         case duration
     }
@@ -50,8 +42,14 @@ struct Summary: Identifiable, Codable, Hashable {
     
     // 格式化时长
     var formattedDuration: String {
+        guard let duration = duration else { return "N/A" }
         let minutes = duration / 60
         let seconds = duration % 60
         return "\(minutes)m \(seconds)s"
+    }
+    
+    // 🔧 是否是最终摘要
+    var isFinal: Bool {
+        return is_final ?? false
     }
 }
