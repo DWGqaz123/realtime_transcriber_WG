@@ -82,30 +82,75 @@ class SessionManager:
     - Cooperate with RunLogger to record session information.
     """
 
-    def __init__(self, run_logger: Optional[RunLogger] = None, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, run_logger: Optional[RunLogger] = None):
         """
         Initialize the SessionManager.
 
         Args:
-            run_logger: Optional RunLogger to record session runs.
             api_key: ElevenLabs API key. If None, read from environment.
+            run_logger: Optional RunLogger to record session runs.
         """
-        # 原有字段
+        
+        print("\n" + "="*60)
+        print("🔧 STEP 6: SessionManager __init__")
+        print("="*60)
+        
         self.sessions: Dict[str, LiveSession] = {}
         self.run_logger = run_logger
-        self._api_key = api_key or os.getenv("ELEVENLABS_API_KEY", "")
-
+        
+        # 🔧 从多个来源尝试获取 API key
+        env_key = os.getenv("ELEVENLABS_API_KEY", "")
+        
+        print(f"📊 API Key Sources:")
+        print(f"   1. Constructor param: {'[PROVIDED, ' + str(len(api_key)) + ' chars]' if api_key else '[EMPTY]'}")
+        if api_key:
+            print(f"      Preview: {api_key[:10]}...{api_key[-4:]}")
+        
+        print(f"   2. Environment var:   {'[SET, ' + str(len(env_key)) + ' chars]' if env_key else '[NOT SET]'}")
+        if env_key:
+            print(f"      Preview: {env_key[:10]}...{env_key[-4:]}")
+        
+        # 🔧 使用提供的 api_key，否则使用环境变量
+        self._api_key = api_key or env_key
+        
+        print(f"   3. Final api_key:     {'[SET, ' + str(len(self._api_key)) + ' chars]' if self._api_key else '[NOT SET]'}")
+        
+        if self._api_key:
+            print(f"   ✅ API Key preview: {self._api_key[:10]}...{self._api_key[-4:]}")
+        else:
+            print(f"   ❌ WARNING: No ElevenLabs API key available!")
+        
+        print(f"{'='*60}\n")
+        
+        # 🔧 初始化索引服务
+        print("🗂️  Initializing IndexingService...")
         self.indexing_service = get_indexing_service()
-        # self.summary_service: Optional[SummaryService] = None
-        from summary_service import SummaryService
-        self.summary_service = SummaryService()
+        print("✅ IndexingService initialized\n")
         
-        print("✨ SessionManager initialized")
+        # 🔧 初始化摘要服务
+        print("🤖 Initializing SummaryService...")
+        try:
+            from summary_service import SummaryService
+            self.summary_service = SummaryService()
+            print("✅ SummaryService initialized\n")
+        except Exception as e:
+            print(f"❌ Failed to initialize SummaryService: {e}")
+            self.summary_service = None
+        
+        # 🔧 打印最终状态
+        print("\n" + "="*60)
+        print("✨ SessionManager Initialization Complete")
+        print("="*60)
         print(f"   Run logger: {'enabled' if run_logger else 'disabled'}")
-        print(f"   API key: {'configured' if self._api_key else 'missing'}")
+        print(f"   ElevenLabs API key: {'configured ✅' if self._api_key else 'missing ❌'}")
         
-        # 🧪 Phase 1 验证（开发阶段使用，生产可注释掉）
-        self._validate_phase1()
+        # 检查 OpenAI API Key（用于摘要）
+        from config import OPENAI_API_KEY
+        print(f"   OpenAI API key: {'configured ✅' if OPENAI_API_KEY else 'missing ❌'}")
+        
+        print(f"   Summary service: {'initialized ✅' if self.summary_service else 'not configured ❌'}")
+        print(f"   Indexing service: initialized ✅")
+        print(f"{'='*60}\n")
     
     def _validate_phase1(self):
         """验证 Phase 1 数据结构升级"""
@@ -1116,7 +1161,10 @@ class SessionManager:
 
             try:
                 config = self._build_elevenlabs_config_for_mode(mode)
-                eleven_client = ElevenLabsRealtimeClient(self._api_key, config)
+                eleven_client = ElevenLabsRealtimeClient(
+                api_key=self._api_key,  
+                config=config
+            )
 
                 # Setup callbacks
                 def on_partial(text: str):

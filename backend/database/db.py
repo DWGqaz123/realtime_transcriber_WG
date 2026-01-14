@@ -14,14 +14,18 @@ DB_PATH = os.path.expanduser("~/Library/Application Support/RealtimeTranscriber/
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 # 创建数据库引擎
-engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
+engine = create_engine(
+    f"sqlite:///{DB_PATH}",
+    connect_args={"check_same_thread": False},
+    echo=False  # 生产环境关闭 SQL 日志
+)
 
 # 创建表
 Base.metadata.create_all(engine)
 
 # 会话工厂
 SessionLocal = sessionmaker(bind=engine)
-
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class DatabaseManager:
     """数据库管理器"""

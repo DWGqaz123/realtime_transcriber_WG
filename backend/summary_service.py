@@ -11,19 +11,19 @@ from typing import Optional
 import httpx
 from datetime import datetime
 import httpx
-from config import SummaryConfig
+from config import SummaryConfig,OPENAI_API_KEY
 class SummaryService:
     """摘要生成服务"""
     
     def __init__(self, api_key: Optional[str] = None):
         
         # 🔧 使用配置类
-        self.api_key = api_key or SummaryConfig.get_api_key()
+        self._api_key = SummaryConfig.get_api_key()
         self.api_url = SummaryConfig.API_URL or "https://api.openai.com/v1/chat/completions"
         self.model = SummaryConfig.MODEL
         self.temperature = SummaryConfig.TEMPERATURE
         self.max_tokens = SummaryConfig.MAX_TOKENS
-        if not self.api_key:
+        if not self._api_key:
             print("⚠️ OPENAI_API_KEY not set, summary generation will fail")
         
     

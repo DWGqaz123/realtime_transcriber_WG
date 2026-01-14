@@ -11,6 +11,20 @@ import websockets
 
 
 
+# backend/elevenlabs_client.py (Improved Version)
+
+import os
+import base64
+import json
+import asyncio
+from dataclasses import dataclass
+from typing import Callable, Optional, Any
+from urllib.parse import urlencode
+import httpx
+import websockets
+
+
+
 @dataclass
 class ElevenLabsConfig:
     """
@@ -49,7 +63,47 @@ class ElevenLabsRealtimeClient:
     """
 
     def __init__(self, api_key: str, config: ElevenLabsConfig):
-        self.api_key = api_key
+        """
+        Initialize ElevenLabs client with API key and configuration.
+        
+        Args:
+            api_key: ElevenLabs API key (from environment or config)
+            config: ElevenLabsConfig instance with connection parameters
+        """
+        # 🔧 新增：详细的初始化日志
+        print(f"\n{'='*60}")
+        print(f"🎤 ElevenLabsRealtimeClient Initialization")
+        print(f"{'='*60}")
+        
+        # 从多个来源尝试获取 API key
+        self.api_key = api_key or os.getenv("ELEVENLABS_API_KEY") or ""
+        
+        # 详细日志
+        print(f"📊 API Key Sources:")
+        print(f"   1. Constructor param: {'[PROVIDED]' if api_key else '[EMPTY]'}")
+        print(f"   2. Environment var:   {'[SET]' if os.getenv('ELEVENLABS_API_KEY') else '[NOT SET]'}")
+        print(f"   3. Final api_key:     {'[SET]' if self.api_key else '[NOT SET]'}")
+        
+        if self.api_key:
+            print(f"   ✅ API Key preview: {self.api_key[:10]}...{self.api_key[-4:]}")
+        else:
+            print(f"   ❌ NO API KEY AVAILABLE!")
+        
+        print(f"\n📋 Configuration:")
+        print(f"   Mode: {config.mode}")
+        print(f"   Model: {config.model_id}")
+        print(f"   Audio Format: {config.audio_format}")
+        print(f"   Sample Rate: {config.sample_rate}")
+        print(f"   Commit Strategy: {config.commit_strategy}")
+        print(f"   Language: {config.language_code or 'auto-detect'}")
+        print(f"{'='*60}\n")
+        
+        # 如果没有 API key，立即抛出错误
+        if not self.api_key:
+            error_msg = "No API key provided, cannot connect"
+            print(f"❌ FATAL: {error_msg}")
+            raise ValueError(error_msg)
+        
         self.config = config
 
         self.on_partial: Optional[Callable[[str], None]] = None
@@ -63,6 +117,7 @@ class ElevenLabsRealtimeClient:
         self._last_audio_time: float = 0.0  # 最后发送音频的时间
         self._reconnect_lock = asyncio.Lock()  # 重连锁，避免并发重连
         
+        print(f"✅ ElevenLabsRealtimeClient initialized successfully")
 
     async def _fetch_single_use_token(self) -> str:
         """
@@ -76,7 +131,9 @@ class ElevenLabsRealtimeClient:
         - Single-use authentication token for WebSocket connection
         """
         if not self.api_key:
-            raise RuntimeError("ELEVENLABS_API_KEY is not set")
+            error_msg = "ELEVENLABS_API_KEY is not set"
+            print(f"❌ {error_msg}")
+            raise RuntimeError(error_msg)
 
         url = "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe"
         headers = {"xi-api-key": self.api_key}
@@ -102,6 +159,13 @@ class ElevenLabsRealtimeClient:
                     print(f"❌ API Error Response:")
                     print(f"   Status: {resp.status_code}")
                     print(f"   Body: {error_text}")
+                    
+                    # 特殊处理常见错误
+                    if resp.status_code == 401:
+                        print(f"\n⚠️  Authentication failed - API key is invalid or expired")
+                    elif resp.status_code == 403:
+                        print(f"\n⚠️  Access forbidden - check your API key permissions")
+                    
                     resp.raise_for_status()  # 抛出异常
                 
                 data = resp.json()
@@ -143,19 +207,26 @@ class ElevenLabsRealtimeClient:
         - RuntimeError if no API key is provided
         - Various exceptions if connection fails
         """
+        print(f"\n{'='*60}")
+        print(f"🔌 ElevenLabs Connection Process Starting")
+        print(f"{'='*60}")
+        
         if self._connected:
             print("[ElevenLabsRealtimeClient] Already connected, skipping")
             return
 
         if not self.api_key:
-            raise RuntimeError("No API key provided, cannot connect")
+            error_msg = "No API key provided, cannot connect"
+            print(f"❌ {error_msg}")
+            raise RuntimeError(error_msg)
 
         # 1) Get single-use token
         try:
+            print(f"📡 Step 1: Fetching single-use token...")
             token = await self._fetch_single_use_token()
-            print("[ElevenLabsRealtimeClient] Obtained single-use token")
+            print(f"✅ Step 1 complete: Token obtained")
         except Exception as exc:
-            print(f"[ElevenLabsRealtimeClient] Failed to fetch token: {exc}")
+            print(f"❌ Step 1 failed: {exc}")
             raise
 
         # 2) Build WebSocket URL with all parameters
@@ -186,7 +257,9 @@ class ElevenLabsRealtimeClient:
                 params["min_silence_duration_ms"] = str(self.config.min_silence_duration_ms)
 
         url = f"{base_url}?{urlencode(params)}"
-        print(f"[ElevenLabsRealtimeClient] Connecting to {url[:100]}...")
+        print(f"📡 Step 2: Connecting to WebSocket...")
+        print(f"   URL: {url[:100]}...")
+        print(f"   Params: {list(params.keys())}")
 
         # 3) Connect to WebSocket
         try:
@@ -196,15 +269,19 @@ class ElevenLabsRealtimeClient:
                 ping_interval=20,  # 🔧 新增：每20秒发送ping保持连接
                 ping_timeout=10,   # 🔧 新增：ping超时10秒
             )
+            print(f"✅ Step 2 complete: WebSocket connected")
         except Exception as exc:
-            print(f"[ElevenLabsRealtimeClient] Failed to connect: {exc}")
+            print(f"❌ Step 2 failed: {exc}")
             self._connected = False
             self._ws = None
             raise
 
         self._connected = True
         self._last_audio_time = asyncio.get_event_loop().time()  # 🔧 新增：记录连接时间
-        print("[ElevenLabsRealtimeClient] Connected successfully")
+        
+        print(f"\n{'='*60}")
+        print(f"✅ ElevenLabs Connection Established Successfully")
+        print(f"{'='*60}\n")
 
         # Start background receive loop
         asyncio.create_task(self._receive_loop())

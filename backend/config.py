@@ -48,6 +48,175 @@ All mode-specific settings are centralized here.
 from dataclasses import dataclass
 from typing import Optional
 import os
+import sys
+from pathlib import Path
+import json
+
+# 检测是否为 PyInstaller 打包
+if getattr(sys, 'frozen', False):
+    # 打包后的路径
+    BASE_DIR = Path(sys._MEIPASS)
+    # 数据文件需要放在用户目录
+    APP_DATA_DIR = Path.home() / "Library" / "Application Support" / "RealtimeTranscriber"
+    print(f"🔍 Running as packaged app")
+    print(f"📦 Base dir: {BASE_DIR}")
+else:
+    # 开发环境
+    BASE_DIR = Path(__file__).parent
+    APP_DATA_DIR = BASE_DIR
+    print(f"🔧 Running in development mode")
+    print(f"📁 Base dir: {BASE_DIR}")
+
+# 创建必要的目录
+APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
+(APP_DATA_DIR / "runs").mkdir(exist_ok=True)
+(APP_DATA_DIR / "database").mkdir(exist_ok=True)
+
+# 配置路径
+MODELS_DIR = BASE_DIR / "models"
+DATABASE_PATH = APP_DATA_DIR / "database" / "transcriptions.db"
+RUNS_DIR = APP_DATA_DIR / "runs"
+
+print(f"📁 Models dir: {MODELS_DIR}")
+print(f"💾 Database: {DATABASE_PATH}")
+print(f"📝 Runs dir: {RUNS_DIR}")
+
+# ==================== API Keys Configuration ====================
+
+def get_config_file_path():
+    """获取配置文件路径"""
+    home = Path.home()
+    config_file = home / "Library" / "Application Support" / "RealtimeTranscriber" / "api_keys.json"
+    
+    print("\n" + "="*60)
+    print("📂 STEP 2: Looking for Config File")
+    print("="*60)
+    print(f"Config file path: {config_file}")
+    print(f"File exists: {config_file.exists()}")
+    
+    if config_file.exists():
+        print(f"File size: {config_file.stat().st_size} bytes")
+        print(f"File permissions: {oct(config_file.stat().st_mode)}")
+    
+    print("="*60 + "\n")
+    
+    return config_file
+
+
+def load_api_keys():
+    """从多个来源加载 API Keys"""
+    
+    print("\n" + "="*60)
+    print("🔑 STEP 3: Loading API Keys")
+    print("="*60)
+    
+    # 1. 检查环境变量
+    openai_key_env = os.getenv("OPENAI_API_KEY", "")
+    elevenlabs_key_env = os.getenv("ELEVENLABS_API_KEY", "")
+    
+    print("\n1️⃣ Environment Variables:")
+    print(f"   OPENAI_API_KEY: {'SET (' + str(len(openai_key_env)) + ' chars)' if openai_key_env else 'NOT SET'}")
+    if openai_key_env:
+        print(f"   Preview: {openai_key_env[:10]}...{openai_key_env[-4:]}")
+    
+    print(f"   ELEVENLABS_API_KEY: {'SET (' + str(len(elevenlabs_key_env)) + ' chars)' if elevenlabs_key_env else 'NOT SET'}")
+    if elevenlabs_key_env:
+        print(f"   Preview: {elevenlabs_key_env[:10]}...{elevenlabs_key_env[-4:]}")
+    
+    # 2. 从配置文件读取
+    openai_key_file = ""
+    elevenlabs_key_file = ""
+    
+    config_file = get_config_file_path()
+    
+    print("\n2️⃣ Config File:")
+    
+    if config_file.exists():
+        try:
+            with open(config_file, 'r') as f:
+                file_content = f.read()
+                print(f"   File content ({len(file_content)} chars):")
+                print(f"   {file_content[:200]}...")
+                
+                # 重新解析
+                config = json.loads(file_content)
+                
+                openai_key_file = config.get("openai_api_key", "")
+                elevenlabs_key_file = config.get("elevenlabs_api_key", "")
+                
+                print(f"\n   Parsed keys:")
+                print(f"   openai_api_key: {'SET (' + str(len(openai_key_file)) + ' chars)' if openai_key_file else 'NOT SET'}")
+                if openai_key_file:
+                    print(f"   Preview: {openai_key_file[:10]}...{openai_key_file[-4:]}")
+                
+                print(f"   elevenlabs_api_key: {'SET (' + str(len(elevenlabs_key_file)) + ' chars)' if elevenlabs_key_file else 'NOT SET'}")
+                if elevenlabs_key_file:
+                    print(f"   Preview: {elevenlabs_key_file[:10]}...{elevenlabs_key_file[-4:]}")
+                
+        except Exception as e:
+            print(f"   ❌ Failed to load: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"   ❌ Config file not found")
+    
+    # 3. 选择最终值
+    openai_key = openai_key_env or openai_key_file
+    elevenlabs_key = elevenlabs_key_env or elevenlabs_key_file
+    
+    print("\n3️⃣ Final Values:")
+    print(f"   OPENAI_API_KEY: {'SET (' + str(len(openai_key)) + ' chars)' if openai_key else 'NOT SET'}")
+    if openai_key:
+        print(f"   Source: {'Environment' if openai_key_env else 'Config File'}")
+        print(f"   Preview: {openai_key[:10]}...{openai_key[-4:]}")
+    
+    print(f"   ELEVENLABS_API_KEY: {'SET (' + str(len(elevenlabs_key)) + ' chars)' if elevenlabs_key else 'NOT SET'}")
+    if elevenlabs_key:
+        print(f"   Source: {'Environment' if elevenlabs_key_env else 'Config File'}")
+        print(f"   Preview: {elevenlabs_key[:10]}...{elevenlabs_key[-4:]}")
+    
+    print("="*60 + "\n")
+    
+    return openai_key, elevenlabs_key
+
+
+# 加载 API Keys
+OPENAI_API_KEY, ELEVENLABS_API_KEY = load_api_keys()
+
+
+def validate_api_keys():
+    """验证 API Keys"""
+    missing_keys = []
+    
+    if not OPENAI_API_KEY:
+        missing_keys.append("OPENAI_API_KEY")
+    
+    if not ELEVENLABS_API_KEY:
+        missing_keys.append("ELEVENLABS_API_KEY")
+    
+    if missing_keys:
+        print("\n" + "="*60)
+        print("⚠️  WARNING: Missing API Keys")
+        print("="*60)
+        for key in missing_keys:
+            print(f"   ❌ {key} is not set")
+        print(f"\nPlease configure API Keys in the app Settings.")
+        print(f"Config file: {get_config_file_path()}")
+        print("="*60 + "\n")
+        return False
+    else:
+        print("\n" + "="*60)
+        print("✅ API Keys Configured")
+        print("="*60)
+        print(f"   ✅ OPENAI_API_KEY: {OPENAI_API_KEY[:10]}...{OPENAI_API_KEY[-4:]}")
+        print(f"   ✅ ELEVENLABS_API_KEY: {ELEVENLABS_API_KEY[:10]}...{ELEVENLABS_API_KEY[-4:]}")
+        print("="*60 + "\n")
+        return True
+    
+
+# 服务器配置
+HOST = "127.0.0.1"
+PORT = 8000
 
 @dataclass
 class ModeConfig:
@@ -179,17 +348,11 @@ class SummaryConfig:
     # ==================== OpenAI API 配置 ====================
     
     # API 密钥
-    # OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    # 同时使用类方法延迟读取API_KEY
-    @classmethod
-    def get_api_key(cls) -> str:
-        """
-        获取 OpenAI API 密钥（延迟读取，确保 .env 已加载）
-        
-        Returns:
-            str: API 密钥，如果未设置则返回空字符串
-        """
-        return os.getenv("OPENAI_API_KEY", "")
+    # 🔧 API Key 从环境变量获取
+    @staticmethod
+    def get_api_key() -> str:
+        """获取 OpenAI API Key"""
+        return OPENAI_API_KEY
     
     # 模型选择
     MODEL: str = "gpt-4-turbo"
@@ -227,6 +390,7 @@ class SummaryConfig:
         
         # 验证 API 配置
         api_key = cls.get_api_key()
+        
         if not api_key:
             errors.append("OPENAI_API_KEY is not set in environment variables")
         

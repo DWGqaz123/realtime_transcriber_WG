@@ -14,6 +14,51 @@ This project is a full-stack AI application designed to close the loop between *
 
 It creates a seamless pipeline from **Speech**  **Text**  **Insight**  **Long-term Memory**.
 
+
+# Realtime Transcriber 用户指南
+
+## 快速开始
+
+### 1. 安装
+
+1. 双击 `RealtimeTranscriber_v1.0.0.dmg`
+2. 拖动 App 到 Applications 文件夹
+3. 首次打开时：
+   - 右键点击 App → "打开"
+   - 或在安全设置中允许
+
+### 2. 配置 API Keys
+
+1. 启动 App
+2. 菜单栏 → RealtimeTranscriberMac → Settings (⌘,)
+3. 输入 API Keys：
+   - **OpenAI**: 从 https://platform.openai.com/api-keys 获取
+   - **ElevenLabs**: 从 https://elevenlabs.io 获取
+4. 点击 "Save & Restart Backend"
+
+### 3. 开始使用
+
+1. 创建项目
+2. 选择模式（讲座/对话）
+3. 点击 "开始录音"
+4. 说话即可实时转录
+5. 系统会自动生成摘要
+
+## 常见问题
+
+### Q: 无法打开 App
+A: 右键点击 → "打开"，或在安全设置中允许
+
+### Q: 后端无法启动
+A: Settings → "Save & Restart Backend"
+
+### Q: 转录不准确
+A: 检查麦克风权限，确保 ElevenLabs API Key 正确
+
+## 技术支持
+
+邮箱: your-email@example.com
+
 ---
 
 ## ✨ Key Features
