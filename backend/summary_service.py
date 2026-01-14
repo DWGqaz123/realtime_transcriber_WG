@@ -44,7 +44,7 @@ class SummaryService:
         Returns:
             Markdown 格式的摘要，失败返回 None
         """
-        if not self.api_key:
+        if not self._api_key:
             print("❌ Cannot generate summary: API key not configured")
             return None
         
@@ -63,7 +63,7 @@ class SummaryService:
                 response = await client.post(
                     self.api_url,
                     headers={
-                        "Authorization": f"Bearer {self.api_key}",
+                        "Authorization": f"Bearer {self._api_key}",
                         "Content-Type": "application/json",
                     },
                     json={

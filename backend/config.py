@@ -310,7 +310,7 @@ class SummaryConfig:
         
     # 标准触发时间间隔（秒）
     # 默认：5分钟 = 300秒
-    SUMMARY_INTERVAL_SECONDS: int = 30
+    SUMMARY_INTERVAL_SECONDS: int = 120
     
     # 宽松模式触发时间（秒）
     # 超过此时间后降低触发要求（忽略语义完整性检查）

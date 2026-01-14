@@ -8,57 +8,69 @@
 
 This project is a full-stack AI application designed to close the loop between **capturing information** and **retrieving knowledge**. Unlike traditional recorders that leave you with hours of raw audio, this assistant acts as a "second brain":
 
-1. **Listens** using low-latency transcription (ElevenLabs Scribe).
-2. **Thinks** by generating structured, context-aware summaries every ~30 seconds (GPT-4).
+1. **Listens** using low-latency transcription (ElevenLabs Scribe). Chose between 'Lecture' and 'Discussion' mode.
+2. **Thinks** by generating structured, context-aware summaries every ~120 seconds (GPT-4).
 3. **Remembers** by indexing content locally for semantic retrieval (FAISS + SentenceTransformers).
 
 It creates a seamless pipeline from **Speech**  **Text**  **Insight**  **Long-term Memory**.
 
 
-# Realtime Transcriber 用户指南
+# Realtime Transcriber User Handbook
+## 📥 Download
 
-## 快速开始
+**[Latest Release (v1.0.0)](https://github.com/DWGqaz123/realtime_transcriber_WG/releases/latest)**
 
-### 1. 安装
+## 🚀 Quick Start
 
-1. 双击 `RealtimeTranscriber_v1.0.0.dmg`
-2. 拖动 App 到 Applications 文件夹
-3. 首次打开时：
-   - 右键点击 App → "打开"
-   - 或在安全设置中允许
+1. Download and install the app
+2. Configure API keys in Settings
+3. Start recording and transcribing!
 
-### 2. 配置 API Keys
+[Full documentation →](docs/)
 
-1. 启动 App
-2. 菜单栏 → RealtimeTranscriberMac → Settings (⌘,)
-3. 输入 API Keys：
-   - **OpenAI**: 从 https://platform.openai.com/api-keys 获取
-   - **ElevenLabs**: 从 https://elevenlabs.io 获取
-4. 点击 "Save & Restart Backend"
+## 🛠️ Development
 
-### 3. 开始使用
+### Requirements
 
-1. 创建项目
-2. 选择模式（讲座/对话）
-3. 点击 "开始录音"
-4. 说话即可实时转录
-5. 系统会自动生成摘要
+- macOS 12.0+
+- Xcode 14.0+
+- Python 3.10+
+- Conda
 
-## 常见问题
+### Setup
+```bash
+# Clone repository
+git clone https://github.com/你的用户名/realtime_transcriber_WG.git
+cd realtime_transcriber_WG
 
-### Q: 无法打开 App
-A: 右键点击 → "打开"，或在安全设置中允许
+# Setup backend
+cd backend
+conda create -n realtime_transcriber_env python=3.10
+conda activate realtime_transcriber_env
+pip install -r requirements.txt
 
-### Q: 后端无法启动
-A: Settings → "Save & Restart Backend"
+# Open frontend in Xcode
+cd ../frontend_mac/RealtimeTranscriberMac
+open RealtimeTranscriberMac.xcodeproj
+```
 
-### Q: 转录不准确
-A: 检查麦克风权限，确保 ElevenLabs API Key 正确
+### Architecture
 
-## 技术支持
+- **Frontend:** Swift + SwiftUI
+- **Backend:** Python + FastAPI
+- **ML/AI:** ElevenLabs + OpenAI + SentenceTransformers
 
-邮箱: your-email@example.com
+## 📄 License
 
+MIT License - see [LICENSE](LICENSE) for details
+
+## 🙏 Credits
+
+Built with ElevenLabs, OpenAI, and open-source libraries.
+
+---
+
+⭐ Star this repo if you find it useful!
 ---
 
 ## ✨ Key Features
