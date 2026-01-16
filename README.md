@@ -18,7 +18,7 @@ It creates a seamless pipeline from **Speech**  **Text**  **Insight**  **Long-te
 # Realtime Transcriber User Handbook
 ## 📥 Download
 
-**[Latest Release (v1.0.0)](https://github.com/DWGqaz123/realtime_transcriber_WG/releases/latest)**
+**[Latest Release (v1.0.1)](https://github.com/DWGqaz123/realtime_transcriber_WG/releases/latest)**
 
 ## 🚀 Quick Start
 
@@ -202,7 +202,7 @@ uvicorn main:app --reload
 
 | Real-time Transcription | Semantic Search |
 | --- | --- |
-| *(Place screenshot of the main transcription view here)* | *(Place screenshot of the search results view here)* |
+| *(TBD* | *(TBD)* |
 
 ---
 
