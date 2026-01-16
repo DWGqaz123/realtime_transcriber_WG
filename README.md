@@ -200,9 +200,12 @@ uvicorn main:app --reload
 
 ## 📸 Screenshots
 
-| Real-time Transcription | Semantic Search |
-| --- | --- |
-| *(TBD* | *(TBD)* |
+| Real-time Transcription | Transcripts Record | Semantic Search |
+| --- | --- | --- |
+|<img width="1401" height="758" alt="Screenshot 2026-01-15 at 20 31 00" src="https://github.com/user-attachments/assets/8351b1bd-cf68-4e0f-bbb6-99694ea5246d" />
+| <img width="1401" height="760" alt="Screenshot 2026-01-15 at 20 30 51" src="https://github.com/user-attachments/assets/eb194900-b9ec-4e08-9602-080f07712eac" />
+|<img width="1399" height="758" alt="Screenshot 2026-01-15 at 20 31 38" src="https://github.com/user-attachments/assets/eeb0e9bd-830f-4e41-95e7-16fda5e6b700" />
+|
 
 ---
 
