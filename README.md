@@ -14,6 +14,15 @@ This project is a full-stack AI application designed to close the loop between *
 
 It creates a seamless pipeline from **Speech**  **Text**  **Insight**  **Long-term Memory**.
 
+---
+
+## 📸 Screenshots
+
+| Real-time Transcription | Transcripts Record | Semantic Search |
+| --- | --- | --- |
+|<img width="1399" height="762" alt="Screenshot 2026-01-15 at 20 30 06" src="https://github.com/user-attachments/assets/f13af411-323d-48ca-9af8-9a30342bf584" /> | <img width="800" height="760" alt="Screenshot 2026-01-15 at 20 30 51" src="https://github.com/user-attachments/assets/eb194900-b9ec-4e08-9602-080f07712eac" /> <img width="800" height="758" alt="Screenshot 2026-01-15 at 20 31 38" src="https://github.com/user-attachments/assets/eeb0e9bd-830f-4e41-95e7-16fda5e6b700" /> | <img width="1399" height="758" alt="Screenshot 2026-01-15 at 20 31 38" src="https://github.com/user-attachments/assets/d86ac4b5-8711-4587-83c4-fc38d5d5fc4b" /> |
+
+---
 
 # Realtime Transcriber User Handbook
 ## 📥 Download
@@ -53,25 +62,6 @@ pip install -r requirements.txt
 cd ../frontend_mac/RealtimeTranscriberMac
 open RealtimeTranscriberMac.xcodeproj
 ```
-
-### Architecture
-
-- **Frontend:** Swift + SwiftUI
-- **Backend:** Python + FastAPI
-- **ML/AI:** ElevenLabs + OpenAI + SentenceTransformers
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) for details
-
-## 🙏 Credits
-
-Built with ElevenLabs, OpenAI, and open-source libraries.
-
----
-
-⭐ Star this repo if you find it useful!
----
 
 ## ✨ Key Features
 
@@ -155,66 +145,6 @@ A privacy-focused implementation of Retrieval-Augmented Generation.
 * **UI Framework:** SwiftUI
 * **Architecture:** MVVM + Combine
 * **Audio:** AVFoundation (High-performance capture)
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-* macOS 13.0+ (Ventura or later)
-* Python 3.10+
-* Xcode 14+
-* API Keys for OpenAI and ElevenLabs.
-
-### 1. Backend Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/project-name.git
-cd project-name/backend
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Create .env file
-echo "OPENAI_API_KEY=your_key" > .env
-echo "ELEVENLABS_API_KEY=your_key" >> .env
-
-# Run the server
-uvicorn main:app --reload
-
-```
-
-### 2. Frontend Setup
-
-1. Open `frontend/YourApp.xcodeproj` in Xcode.
-2. Ensure the backend is running on `http://localhost:8000`.
-3. Build and Run (Cmd + R).
-
----
-
-## 📸 Screenshots
-
-| Real-time Transcription | Transcripts Record | Semantic Search |
-| --- | --- | --- |
-|<img width="1401" height="758" alt="Screenshot 2026-01-15 at 20 31 00" src="https://github.com/user-attachments/assets/8351b1bd-cf68-4e0f-bbb6-99694ea5246d" />
-| <img width="1401" height="760" alt="Screenshot 2026-01-15 at 20 30 51" src="https://github.com/user-attachments/assets/eb194900-b9ec-4e08-9602-080f07712eac" />
-|<img width="1399" height="758" alt="Screenshot 2026-01-15 at 20 31 38" src="https://github.com/user-attachments/assets/eeb0e9bd-830f-4e41-95e7-16fda5e6b700" />
-|
-
----
-
-## 🔮 Future Roadmap
-
-* [ ] **GPU Acceleration:** Move local embedding to Metal (MPS) for faster processing.
-* [ ] **Graph View:** Visualize connections between different meetings/sessions.
-* [ ] **Multi-modal:** Support indexing of shared images or screen captures during meetings.
-* [ ] **Export:** Export summaries to Notion/Obsidian.
 
 ---
 
