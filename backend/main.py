@@ -12,6 +12,8 @@ import logging
 
 log = logging.getLogger("transcriber.main")
 
+# logging.basicConfig(level=logging.INFO)
+
 
 def get_backend_host() -> str:
     return os.getenv("HOST", "0.0.0.0")

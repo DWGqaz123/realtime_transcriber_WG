@@ -10,6 +10,8 @@ import Foundation
 struct RecordingSession: Identifiable, Codable, Hashable {
     let id: Int
     let mode: String
+    let name: String?
+    let notes: String?
     let durationSeconds: Int
     let sentenceCount: Int
     let charCount: Int
@@ -17,10 +19,12 @@ struct RecordingSession: Identifiable, Codable, Hashable {
     let endedAt: Date?
     let transcriptText: String?
     let summaries: [SessionSummary]?
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case mode
+        case name
+        case notes
         case durationSeconds = "duration_seconds"
         case sentenceCount = "sentence_count"
         case charCount = "char_count"

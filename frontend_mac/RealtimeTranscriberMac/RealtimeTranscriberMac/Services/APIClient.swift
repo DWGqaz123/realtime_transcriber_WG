@@ -25,6 +25,16 @@ final class APIClient {
         return try await request(path: path, method: "POST", body: bodyData)
     }
 
+    func patch<T: Decodable, Body: Encodable>(_ path: String, body: Body) async throws -> T {
+        let bodyData: Data
+        do {
+            bodyData = try JSONEncoder().encode(body)
+        } catch {
+            throw ProjectServiceError.networkError(error)
+        }
+        return try await request(path: path, method: "PATCH", body: bodyData)
+    }
+
     func delete(_ path: String) async throws {
         let _: EmptyResponse = try await request(path: path, method: "DELETE")
     }

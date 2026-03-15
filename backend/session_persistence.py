@@ -15,8 +15,9 @@ log = logging.getLogger("transcriber.persistence")
 class SessionPersistenceService:
     """Persistence operations extracted from SessionManager."""
 
-    def __init__(self, indexing_service: Any):
+    def __init__(self, indexing_service: Any, summary_service: Optional[SummaryService] = None):
         self.indexing_service = indexing_service
+        self._summary_service = summary_service or SummaryService()
 
     def save_session(self, session: Any) -> dict:
         duration = int(time.time() - session.start_time)
@@ -63,7 +64,7 @@ class SessionPersistenceService:
         if not full_transcript or len(full_transcript.strip()) < 20 or not session.db_session_id:
             return None
 
-        summary_content = await SummaryService().generate_summary(
+        summary_content = await self._summary_service.generate_summary(
             buffer_text=full_transcript,
             context="",
         )

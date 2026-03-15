@@ -152,8 +152,6 @@ async def get_search_stats(project_id: int):
         # 获取数据库统计
         db = DatabaseManager.get_db()
         try:
-            from database.models import Embedding
-            
             total_summaries = db.query(Summary).join(DBSession).filter(
                 DBSession.project_id == project_id
             ).count()

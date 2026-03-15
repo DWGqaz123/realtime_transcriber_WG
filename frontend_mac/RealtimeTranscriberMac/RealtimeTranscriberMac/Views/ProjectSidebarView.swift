@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ProjectSidebarView: View {
     @ObservedObject var viewModel: ProjectListViewModel
+    var onNewSession: ((Project) -> Void)? = nil
     @State private var showCreateSheet = false
     @State private var showDeleteConfirmation = false
     @State private var showDeleteSessionConfirmation = false
@@ -92,7 +93,8 @@ struct ProjectSidebarView: View {
                                 onDelete: {
                                     projectToDelete = project
                                     showDeleteConfirmation = true
-                                }
+                                },
+                            onNewSession: onNewSession.map { cb in { cb(project) } }
                             )
                         }
                     }
@@ -298,6 +300,7 @@ struct ProjectRowExpandable: View {
     let onSelectSession: (RecordingSession) -> Void
     let onDeleteSession: (RecordingSession) -> Void
     let onDelete: () -> Void
+    var onNewSession: (() -> Void)? = nil
     
     @State private var isHovering = false
     
@@ -335,8 +338,17 @@ struct ProjectRowExpandable: View {
                 
                 Spacer()
                 
-                // Delete button
+                // Hover action buttons
                 if isHovering {
+                    if let onNewSession {
+                        Button(action: onNewSession) {
+                            Image(systemName: "plus.circle")
+                                .foregroundColor(.indigo)
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .help("New session in this project")
+                    }
                     Button(action: onDelete) {
                         Image(systemName: "trash")
                             .foregroundColor(.red)
@@ -407,10 +419,17 @@ struct SessionRowView: View {
                 .frame(width: 16)
             
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.modeDisplayName)
-                    .font(.caption)
-                    .fontWeight(isSelected ? .semibold : .regular)
-                
+                if let name = session.name, !name.isEmpty {
+                    Text(name)
+                        .font(.caption)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                        .lineLimit(1)
+                } else {
+                    Text(session.modeDisplayName)
+                        .font(.caption)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                }
+
                 HStack(spacing: 4) {
                     Text(session.formattedStartDate)
                         .font(.caption2)

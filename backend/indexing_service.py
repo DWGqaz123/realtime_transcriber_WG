@@ -61,43 +61,29 @@ class IndexingService:
             
             embeddings = self.embedding_service.embed_batch(texts)
             
-            # Step 4: 添加到 FAISS 索引
-            success = self.faiss_manager.add_vectors(
+            # Step 4: 添加到 FAISS 索引，直接获得分配的 faiss ID 列表
+            assigned_faiss_ids = self.faiss_manager.add_vectors(
                 project_id=project_id,
                 embeddings=embeddings,
-                summary_ids=summary_ids
+                summary_ids=summary_ids,
             )
-            
-            if not success:
+
+            if not assigned_faiss_ids:
                 return {"success": False, "error": "Failed to add vectors to FAISS"}
-            
+
             # Step 5: 保存 FAISS 索引到磁盘
             self.faiss_manager.save_index(project_id)
-            
-            # Step 6: 保存元数据到数据库
-            
-            # 获取 FAISS ID 映射
-            mapping = self.faiss_manager.id_mappings[project_id]
-            summary_to_faiss_id = {summary_id: faiss_id for faiss_id, summary_id in mapping.items()}
-            
-            for summary in summaries:
-                faiss_id = summary_to_faiss_id.get(summary.id)
-                if faiss_id is None:
-                    continue
-                
-                # 创建 Embedding 记录
-                embedding = Embedding(
+
+            # Step 6: 保存元数据到数据库（直接用返回的 faiss ID，无需反转映射）
+            for summary, faiss_id in zip(summaries, assigned_faiss_ids):
+                db.add(Embedding(
                     summary_id=summary.id,
                     faiss_index_id=faiss_id,
                     content_preview=summary.content[:200],
                     session_mode=session.mode,
                     embedding_model=self.embedding_service.model_name,
-                    embedding_dimension=self.embedding_service.dimension
-                )
-                
-                db.add(embedding)
-                
-                # 更新 summary 的索引状态
+                    embedding_dimension=self.embedding_service.dimension,
+                ))
                 summary.is_indexed = True
                 summary.indexed_at = datetime.utcnow()
                 

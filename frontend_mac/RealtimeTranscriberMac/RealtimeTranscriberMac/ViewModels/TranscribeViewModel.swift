@@ -87,8 +87,16 @@ final class TranscribeViewModel: ObservableObject {
     // 🔧 新增：配置常量
     @Published private(set) var summaryIntervalSeconds: Int = 30
     
+    // MARK: - Callbacks
+
+    /// 自动保存完成后调用（用于刷新项目列表等外部副作用）
+    var onSaveComplete: (() -> Void)?
+
+    // 最近一次保存的 DB session id，供弹窗提交 name/notes 使用
+    @Published private(set) var savedSessionId: Int?
+
     // MARK: - Private Properties
-    
+
     private let client = TranscriptionClient()
     private let audioCapture = AudioCaptureService()
     private let apiClient = APIClient()
@@ -303,20 +311,33 @@ final class TranscribeViewModel: ObservableObject {
         
     }
     
-    func saveSession() {
-        guard !fullTranscript.isEmpty else {
-            currentSubtitle = "No transcript to save"
-            return
-        }
-        
-        currentSubtitle = "Saving session..."
-        
-        // send save command
-        client.send(text: "SAVE")
-    }
     func clearTranscript() {
         fullTranscript = ""
         currentSubtitle = ""
+    }
+
+    func startNewSession() {
+        fullTranscript = ""
+        currentSubtitle = ""
+        summaries.removeAll()
+        summaryGenerationProgress = ""
+        savedSessionId = nil
+        permissionStatus = "Ready to record 🎤"
+        client.disconnect()
+        onSaveComplete?()
+    }
+
+    func updateSessionMetadata(name: String, notes: String) async {
+        guard let projectId = currentProjectId, let sessionId = savedSessionId else { return }
+        struct Body: Encodable { let name: String?; let notes: String? }
+        let body = Body(
+            name: name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : name.trimmingCharacters(in: .whitespaces),
+            notes: notes.trimmingCharacters(in: .whitespaces).isEmpty ? nil : notes.trimmingCharacters(in: .whitespaces)
+        )
+        let _: RecordingSession? = try? await apiClient.patch(
+            "api/projects/\(projectId)/sessions/\(sessionId)",
+            body: body
+        )
     }
     
     
@@ -351,16 +372,14 @@ final class TranscribeViewModel: ObservableObject {
         case "summary":
             handleSummaryEvent(from: data)
         case "save_complete":
-            currentSubtitle = "✅ Session saved successfully"
+            savedSessionId = event.payload.session_id
+            currentSubtitle = "✅ Session saved"
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                if self.currentSubtitle.contains("saved successfully") {
+                if self.currentSubtitle.contains("Session saved") {
                     self.currentSubtitle = ""
                 }
             }
-            client.disconnect()
-            fullTranscript = ""
-            summaries.removeAll()
-            permissionStatus = "Ready to record 🎤"
+            onSaveComplete?()
         case "save_status":
             handleSaveStatus(event.payload)
         case "indexing_start":
@@ -368,7 +387,9 @@ final class TranscribeViewModel: ObservableObject {
         case "indexing_complete":
             break
         case "indexing_error":
-            errorMessageIfPresent(event.payload.message ?? "Indexing failed")
+            // Indexing is a background operation; don't disrupt the transcript UI.
+            // The failure is logged on the backend for diagnosis.
+            break
         case "error":
             errorMessageIfPresent(event.payload.message ?? "Unknown error")
         default:

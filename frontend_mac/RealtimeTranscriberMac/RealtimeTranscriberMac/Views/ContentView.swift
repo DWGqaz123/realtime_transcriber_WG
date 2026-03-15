@@ -11,17 +11,30 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var viewModel = TranscribeViewModel()
     @StateObject private var projectViewModel = ProjectListViewModel()
+    @State private var showSaveSheet = false
 
     var body: some View {
         NavigationSplitView {
-            ProjectSidebarView(viewModel: projectViewModel)
+            ProjectSidebarView(
+                viewModel: projectViewModel,
+                onNewSession: { project in
+                    projectViewModel.selectProject(project)
+                    viewModel.currentProjectId = project.id
+                    if viewModel.fullTranscript.isEmpty {
+                        viewModel.startNewSession()
+                    } else {
+                        showSaveSheet = true
+                    }
+                }
+            )
         } detail: {
             // 使用 HSplitView 实现双列布局
             HSplitView {
                 // 左侧：录音和转录区域
                 RecordingView(
                     viewModel: viewModel,
-                    projectViewModel: projectViewModel
+                    projectViewModel: projectViewModel,
+                    onRequestNewSession: { showSaveSheet = true }
                 )
                 .frame(minWidth: 400, idealWidth: 600)
                 .task(id: projectViewModel.selectedProject?.id) {
@@ -39,6 +52,23 @@ struct ContentView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .sheet(isPresented: $showSaveSheet) {
+            SaveSessionSheet(isPresented: $showSaveSheet) { name, notes in
+                Task {
+                    await viewModel.updateSessionMetadata(name: name, notes: notes)
+                    viewModel.startNewSession()
+                }
+            }
+        }
+        .onAppear {
+            viewModel.onSaveComplete = {
+                Task {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    await projectViewModel.loadProjects()
+                    await projectViewModel.refreshSelectedProject()
+                }
+            }
+        }
     }
 }
 
@@ -47,6 +77,7 @@ struct ContentView: View {
 struct RecordingView: View {
     @ObservedObject var viewModel: TranscribeViewModel
     @ObservedObject var projectViewModel: ProjectListViewModel
+    var onRequestNewSession: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -140,23 +171,12 @@ struct RecordingView: View {
                 .tint(viewModel.isRecording ? .red : .indigo)
                 .disabled(projectViewModel.selectedProject == nil && !viewModel.isRecording)
                 
-                // Save button
+                // New Session button
                 if !viewModel.isRecording && !viewModel.fullTranscript.isEmpty {
-                    Button(action: {
-                        viewModel.saveSession()
-                        
-                        // refresh list after saving
-                        Task {
-                            // 等待一小段时间，确保后端保存完成
-                            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5秒
-                            
-                            await projectViewModel.loadProjects()
-                            await projectViewModel.refreshSelectedProject()
-                        }
-                    }) {
+                    Button(action: onRequestNewSession) {
                         HStack(spacing: 8) {
-                            Image(systemName: "square.and.arrow.down.fill")
-                            Text("Save Session")
+                            Image(systemName: "plus.circle.fill")
+                            Text("New Session")
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
@@ -164,7 +184,7 @@ struct RecordingView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
                 }
-                
+
                 // 录音状态指示器
                 if viewModel.isRecording {
                     HStack(spacing: 8) {

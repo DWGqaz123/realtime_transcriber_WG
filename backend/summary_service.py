@@ -7,6 +7,7 @@
 from typing import Optional
 import logging
 import asyncio
+import time
 import httpx
 from config import SummaryConfig
 
@@ -14,21 +15,15 @@ log = logging.getLogger("transcriber.summary")
 
 class SummaryService:
     """摘要生成服务"""
-    
+
     def __init__(self, api_key: Optional[str] = None):
-        """
-        初始化摘要服务
-        
-        Args:
-            api_key: OpenAI API key (可选，会从配置或环境变量读取)
-        """
-        
         self._api_key = api_key or SummaryConfig.get_api_key()
         self.api_url = SummaryConfig.API_URL or "https://api.openai.com/v1/chat/completions"
         self.model = SummaryConfig.MODEL
         self.temperature = SummaryConfig.TEMPERATURE
         self.max_tokens = SummaryConfig.MAX_TOKENS
-        
+        self._client = httpx.AsyncClient(timeout=30.0)
+
     
     async def generate_summary(
         self,
@@ -58,30 +53,31 @@ class SummaryService:
             response = None
             for attempt in range(max_retries):
                 try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        response = await client.post(
-                            self.api_url,
-                            headers={
-                                "Authorization": f"Bearer {self._api_key}",
-                                "Content-Type": "application/json",
-                            },
-                            json={
-                                "model": self.model,
-                                "messages": [
-                                    {
-                                        "role": "system",
-                                        "content": "You are a professional note-taking assistant, skilled at extracting key knowledge points from lectures."
-                                    },
-                                    {
-                                        "role": "user",
-                                        "content": prompt
-                                    }
-                                ],
-                                "max_tokens": self.max_tokens,
-                                "temperature": self.temperature
-                            }
-                        )
-                    break  # 成功则跳出重试循环
+                    t0 = time.perf_counter()
+                    response = await self._client.post(
+                        self.api_url,
+                        headers={
+                            "Authorization": f"Bearer {self._api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self.model,
+                            "messages": [
+                                {
+                                    "role": "system",
+                                    "content": "You are a professional note-taking assistant, skilled at extracting key knowledge points from lectures."
+                                },
+                                {
+                                    "role": "user",
+                                    "content": prompt
+                                }
+                            ],
+                            "max_tokens": self.max_tokens,
+                            "temperature": self.temperature
+                        }
+                    )
+                    log.info("API latency: %.2fs (attempt %d)", time.perf_counter() - t0, attempt + 1)
+                    break
                 except (httpx.TimeoutException, httpx.ConnectError) as e:
                     if attempt < max_retries - 1:
                         wait_time = 2 ** attempt
@@ -118,47 +114,30 @@ class SummaryService:
             return None
     
     def _build_prompt(self, buffer_text: str, context: str) -> str:
-        """构建摘要 prompt
-            Args:
-                buffer_text: 待摘要的文本（当前快照）
-                context: 上一段的末尾句子（上下文）
-            Returns:
-                str: 完整的 Prompt
-        """
-        
         focus = "Extract the main concepts, important conclusions and key data"
-        
+
         if context:
-        # 有上下文
-            prompt = f"""Please generate a concise summary of knowledge points based on the following content.
-
-[Context](For understanding coherence only. Do not generate a summary of this part):
-        {context}
-
-        【Current Content】（Please generate a summary of this part）：
-        {buffer_text}
-
-        Requirements:
-        1. Based on the [Context] understand background and coherence
-        2. Only generate 3-5 key knowledge points for the [Current Content]
-        3. Do not repeat concepts already mentioned in [Context]
-        4. {focus}
-        5. Use Markdown format, each knowledge point starts with `- `
-        6. Each knowledge point is 1-2 sentences, concise and clear
-        7. Highlight core concepts and key information
-        8. Do not add a title, directly list the knowledge points"""
+            return (
+                f"Please generate a concise summary of knowledge points based on the following content.\n\n"
+                f"[Context] (For understanding coherence only. Do not summarize this part):\n{context}\n\n"
+                f"[Current Content] (Generate a summary of this part):\n{buffer_text}\n\n"
+                f"Requirements:\n"
+                f"1. Use [Context] to understand background and coherence\n"
+                f"2. Only generate 3-5 key knowledge points for [Current Content]\n"
+                f"3. Do not repeat concepts already mentioned in [Context]\n"
+                f"4. {focus}\n"
+                f"5. Use Markdown format, each knowledge point starts with `- `\n"
+                f"6. Each knowledge point is 1-2 sentences, concise and clear\n"
+                f"7. Do not add a title, directly list the knowledge points"
+            )
         else:
-            # 无上下文（第一次摘要）
-            prompt = f"""Please generate a concise summary of knowledge points based on the following content.
-                    【Content】：
-                    {buffer_text}
-
-                    Requirements:
-                    1. Extract 3-5 key knowledge points
-                    2. {focus}
-                    3. Use Markdown format, each knowledge point starts with `- `
-                    4. Each knowledge point is 1-2 sentences, concise and clear
-                    5. Highlight core concepts and key information
-                    6. Do not add a title, directly list the knowledge points"""
-
-        return prompt
+            return (
+                f"Please generate a concise summary of knowledge points based on the following content.\n\n"
+                f"[Content]:\n{buffer_text}\n\n"
+                f"Requirements:\n"
+                f"1. Extract 3-5 key knowledge points\n"
+                f"2. {focus}\n"
+                f"3. Use Markdown format, each knowledge point starts with `- `\n"
+                f"4. Each knowledge point is 1-2 sentences, concise and clear\n"
+                f"5. Do not add a title, directly list the knowledge points"
+            )

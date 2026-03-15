@@ -4,6 +4,7 @@ FAISS 索引管理器
 """
 
 import faiss
+import logging
 import numpy as np
 import pickle
 from pathlib import Path
@@ -11,13 +12,13 @@ from typing import List, Optional, Dict
 from dataclasses import dataclass
 from config import EmbeddingConfig
 
+log = logging.getLogger("transcriber.faiss")
+
 
 @dataclass
 class SearchResult:
-    """搜索结果"""
     summary_id: int
-    distance: float
-    similarity: float  # 1 - distance (余弦距离)
+    similarity: float  # 内积 = 余弦相似度（向量已归一化）
 
 
 class FAISSIndexManager:
@@ -91,21 +92,16 @@ class FAISSIndexManager:
             return None
         
         try:
-            # 加载索引
             index = faiss.read_index(str(index_path))
             self.indices[project_id] = index
-            
-            # 加载 ID 映射
             if mapping_path.exists():
-                with open(mapping_path, 'rb') as f:
+                with open(mapping_path, "rb") as f:
                     self.id_mappings[project_id] = pickle.load(f)
             else:
                 self.id_mappings[project_id] = {}
-            
-            
             return index
-            
-        except Exception:
+        except Exception as e:
+            log.warning("Failed to load FAISS index for project %d: %s", project_id, e)
             return None
     
     def save_index(self, project_id: int) -> bool:
@@ -142,44 +138,31 @@ class FAISSIndexManager:
         self,
         project_id: int,
         embeddings: np.ndarray,
-        summary_ids: List[int]
-    ) -> bool:
+        summary_ids: List[int],
+    ) -> List[int]:
         """
-        添加向量到索引
-        
-        Args:
-            project_id: 项目 ID
-            embeddings: 向量矩阵 (N, dimension)
-            summary_ids: 对应的 summary ID 列表
-            
-        Returns:
-            bool: 是否添加成功
+        添加向量到索引，返回分配的 faiss ID 列表（与 summary_ids 一一对应）。
+        失败时返回空列表。
         """
-        # 确保索引存在
         if project_id not in self.indices:
             index = self.load_index(project_id)
             if index is None:
                 index = self.create_index(project_id)
-        
+
         index = self.indices[project_id]
-        
-        # 归一化向量（用于余弦相似度）
         faiss.normalize_L2(embeddings)
-        
-        # 当前索引大小
+
         start_id = index.ntotal
-        
-        # 添加向量
         index.add(embeddings)
-        
-        # 更新 ID 映射
+
         mapping = self.id_mappings[project_id]
+        assigned_ids = []
         for i, summary_id in enumerate(summary_ids):
             faiss_id = start_id + i
             mapping[faiss_id] = summary_id
-        
-        
-        return True
+            assigned_ids.append(faiss_id)
+
+        return assigned_ids
     
     def search(
         self,
@@ -220,22 +203,12 @@ class FAISSIndexManager:
         results = []
         mapping = self.id_mappings[project_id]
         
-        for distance, faiss_id in zip(distances[0], indices[0]):
-            if faiss_id == -1:  # FAISS 返回 -1 表示无效结果
+        for score, faiss_id in zip(distances[0], indices[0]):
+            if faiss_id == -1:
                 continue
-            
             summary_id = mapping.get(faiss_id)
-            if summary_id is None:
-                continue
-            
-            # 内积距离转换为相似度 (越大越相似)
-            similarity = float(distance)
-            
-            results.append(SearchResult(
-                summary_id=summary_id,
-                distance=float(distance),
-                similarity=similarity
-            ))
+            if summary_id is not None:
+                results.append(SearchResult(summary_id=summary_id, similarity=float(score)))
         
         
         return results

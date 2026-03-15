@@ -31,11 +31,13 @@ class Session(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     
     mode = Column(String(50), nullable=False)  # "lecture" or "discussion"
+    name = Column(String(255), nullable=True)
+    notes = Column(Text, nullable=True)
     duration_seconds = Column(Integer, default=0)
     transcript_text = Column(Text, nullable=True)
     sentence_count = Column(Integer, default=0)
     char_count = Column(Integer, default=0)
-    
+
     started_at = Column(DateTime, default=datetime.utcnow)
     ended_at = Column(DateTime, nullable=True)
     
