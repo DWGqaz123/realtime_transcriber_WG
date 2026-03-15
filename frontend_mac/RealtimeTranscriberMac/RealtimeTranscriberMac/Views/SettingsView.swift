@@ -21,17 +21,29 @@ struct SettingsView: View {
         let storedValue = UserDefaults.standard.integer(forKey: "summary_interval_seconds")
         return String(storedValue > 0 ? storedValue : 30)
     }()
+    @State private var transcriptionLanguage: String = UserDefaults.standard.string(forKey: "transcription_language") ?? "en"
     @State private var showSaveSuccess = false
     @State private var validationMessage: String?
+
+    private let languageOptions: [(code: String, label: String)] = [
+        ("", "Auto-detect"),
+        ("en", "English"),
+        ("zh", "Chinese (中文)"),
+        ("ja", "Japanese (日本語)"),
+        ("fr", "French (Français)"),
+        ("de", "German (Deutsch)"),
+        ("es", "Spanish (Español)"),
+    ]
     
     // MARK: - Body
     
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 20) {
             Text("Settings")
                 .font(.largeTitle)
                 .fontWeight(.bold)
-            
+
             Divider()
             
             // OpenAI API Key
@@ -89,6 +101,23 @@ struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
+                Text("Transcription & Summary Language")
+                    .font(.headline)
+
+                Picker("", selection: $transcriptionLanguage) {
+                    ForEach(languageOptions, id: \.code) { option in
+                        Text(option.label).tag(option.code)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 260)
+
+                Text("Locks ElevenLabs speech recognition to the selected language. Summaries will also be generated in this language. Defaults to English.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Auto Summary Interval")
                     .font(.headline)
 
@@ -125,9 +154,10 @@ struct SettingsView: View {
                     .foregroundColor(.red)
             }
             
-            Spacer()
         }
         .padding()
+        .frame(minWidth: 600)
+        } // ScrollView
         .frame(minWidth: 600, minHeight: 400)
     }
     
@@ -158,6 +188,7 @@ struct SettingsView: View {
         UserDefaults.standard.set(trimmedHost, forKey: "backend_host")
         UserDefaults.standard.set(port, forKey: "backend_port")
         UserDefaults.standard.set(summaryInterval, forKey: "summary_interval_seconds")
+        UserDefaults.standard.set(transcriptionLanguage, forKey: "transcription_language")
         
         // 保存到配置文件
         saveAPIKeysToConfigFile()
@@ -179,70 +210,22 @@ struct SettingsView: View {
     }
     
     private func saveAPIKeysToConfigFile() {
-        // 🔧 在方法开头捕获 @State 变量的值
-        let openaiKeyValue = openaiKey
-        let elevenlabsKeyValue = elevenlabsKey
-        
-        
         let fileManager = FileManager.default
-        
-        // 获取应用支持目录
-        guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return
-        }
-        
-        // 创建 RealtimeTranscriber 目录
+        guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
+
         let appDir = appSupportURL.appendingPathComponent("RealtimeTranscriber")
         let configFile = appDir.appendingPathComponent("api_keys.json")
-        
-        
-        // 检查目录是否存在
-        var isDirectory: ObjCBool = false
-        let dirExists = fileManager.fileExists(atPath: appDir.path, isDirectory: &isDirectory)
-        
-        
-        // 创建目录（如果不存在）
+
         do {
             try fileManager.createDirectory(at: appDir, withIntermediateDirectories: true, attributes: nil)
+            let config: [String: String] = [
+                "openai_api_key": openaiKey,
+                "elevenlabs_api_key": elevenlabsKey,
+                "transcription_language": transcriptionLanguage,
+            ]
+            try JSONEncoder().encode(config).write(to: configFile, options: .atomic)
         } catch {
-            return
-        }
-        
-        // 创建配置字典
-        let config: [String: String] = [
-            "openai_api_key": openaiKeyValue,
-            "elevenlabs_api_key": elevenlabsKeyValue
-        ]
-        
-        
-        do {
-            // 编码为 JSON
-            let jsonData = try JSONEncoder().encode(config)
-            
-            // 转换为字符串查看
-            if let jsonString = String(data: jsonData, encoding: .utf8) {
-            }
-            
-            // 写入文件
-            try jsonData.write(to: configFile, options: .atomic)
-            
-            // 验证文件已写入
-            if fileManager.fileExists(atPath: configFile.path) {
-                
-                // 读取文件大小
-                if let attributes = try? fileManager.attributesOfItem(atPath: configFile.path),
-                   let fileSize = attributes[.size] as? Int {
-                }
-                
-                // 尝试读回内容验证
-                if let readData = try? Data(contentsOf: configFile),
-                   let readString = String(data: readData, encoding: .utf8) {
-                }
-            } else {
-            }
-            
-            
-        } catch {
+            // 写入失败时后端将沿用旧配置
         }
     }
 }

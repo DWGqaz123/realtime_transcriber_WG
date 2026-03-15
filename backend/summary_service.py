@@ -116,28 +116,44 @@ class SummaryService:
     def _build_prompt(self, buffer_text: str, context: str) -> str:
         focus = "Extract the main concepts, important conclusions and key data"
 
+        lang = SummaryConfig.LANGUAGE
+        if lang == "zh":
+            lang_instruction = "8. 请用中文输出所有内容"
+        elif lang == "en":
+            lang_instruction = "8. Please write all output in English"
+        else:
+            lang_instruction = None
+
+        def requirements(base: list[str]) -> str:
+            items = base + ([lang_instruction] if lang_instruction else [])
+            return "\n".join(f"{i+1}. {item}" for i, item in enumerate(items))
+
         if context:
             return (
                 f"Please generate a concise summary of knowledge points based on the following content.\n\n"
                 f"[Context] (For understanding coherence only. Do not summarize this part):\n{context}\n\n"
                 f"[Current Content] (Generate a summary of this part):\n{buffer_text}\n\n"
                 f"Requirements:\n"
-                f"1. Use [Context] to understand background and coherence\n"
-                f"2. Only generate 3-5 key knowledge points for [Current Content]\n"
-                f"3. Do not repeat concepts already mentioned in [Context]\n"
-                f"4. {focus}\n"
-                f"5. Use Markdown format, each knowledge point starts with `- `\n"
-                f"6. Each knowledge point is 1-2 sentences, concise and clear\n"
-                f"7. Do not add a title, directly list the knowledge points"
+                + requirements([
+                    "Use [Context] to understand background and coherence",
+                    "Only generate 3-5 key knowledge points for [Current Content]",
+                    "Do not repeat concepts already mentioned in [Context]",
+                    focus,
+                    "Use Markdown format, each knowledge point starts with `- `",
+                    "Each knowledge point is 1-2 sentences, concise and clear",
+                    "Do not add a title, directly list the knowledge points",
+                ])
             )
         else:
             return (
                 f"Please generate a concise summary of knowledge points based on the following content.\n\n"
                 f"[Content]:\n{buffer_text}\n\n"
                 f"Requirements:\n"
-                f"1. Extract 3-5 key knowledge points\n"
-                f"2. {focus}\n"
-                f"3. Use Markdown format, each knowledge point starts with `- `\n"
-                f"4. Each knowledge point is 1-2 sentences, concise and clear\n"
-                f"5. Do not add a title, directly list the knowledge points"
+                + requirements([
+                    "Extract 3-5 key knowledge points",
+                    focus,
+                    "Use Markdown format, each knowledge point starts with `- `",
+                    "Each knowledge point is 1-2 sentences, concise and clear",
+                    "Do not add a title, directly list the knowledge points",
+                ])
             )

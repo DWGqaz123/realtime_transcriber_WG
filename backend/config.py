@@ -43,13 +43,14 @@ def get_config_file_path():
 
 
 def load_api_keys():
-    """从环境变量或配置文件加载 API Keys。"""
+    """从环境变量或配置文件加载 API Keys 和语言设置。"""
     openai_key_env = os.getenv("OPENAI_API_KEY", "")
     elevenlabs_key_env = os.getenv("ELEVENLABS_API_KEY", "")
     hf_key_env = os.getenv("HUGGINGFACE_API_KEY", "")
     openai_key_file = ""
     elevenlabs_key_file = ""
     hf_key_file = ""
+    language_file = ""
     config_file = get_config_file_path()
 
     if config_file.exists():
@@ -59,17 +60,20 @@ def load_api_keys():
             openai_key_file = config.get("openai_api_key", "")
             elevenlabs_key_file = config.get("elevenlabs_api_key", "")
             hf_key_file = config.get("huggingface_api_key", "")
+            language_file = config.get("transcription_language", "")
         except Exception as exc:
             log.warning("Failed to load API key config: %s", exc)
 
     openai_key = openai_key_env or openai_key_file
     elevenlabs_key = elevenlabs_key_env or elevenlabs_key_file
     hf_key = hf_key_env or hf_key_file
-    return openai_key, elevenlabs_key, hf_key
+    language = os.getenv("TRANSCRIPTION_LANGUAGE", language_file)
+    return openai_key, elevenlabs_key, hf_key, language
 
 
-# 加载 API Keys
-OPENAI_API_KEY, ELEVENLABS_API_KEY, HUGGINGFACE_API_KEY = load_api_keys()
+# 加载配置
+OPENAI_API_KEY, ELEVENLABS_API_KEY, HUGGINGFACE_API_KEY, TRANSCRIPTION_LANGUAGE = load_api_keys()
+log.info("Transcription language: %s", TRANSCRIPTION_LANGUAGE or "auto-detect")
 
 @dataclass
 class ModeConfig:
@@ -95,6 +99,9 @@ class ModeConfig:
 
 class TranscriptionConfig:
     """Mode-specific ElevenLabs configuration."""
+
+    # None = auto-detect; set from TRANSCRIPTION_LANGUAGE if provided
+    _lang: Optional[str] = TRANSCRIPTION_LANGUAGE or None
 
     LECTURE = ModeConfig(
         commit_strategy="manual",
@@ -159,6 +166,9 @@ class SummaryConfig:
         "......",
     }
     CONTEXT_CACHE_SIZE: int = 3
+
+    # "" = auto / follow transcript; "en" = English; "zh" = Chinese
+    LANGUAGE: str = TRANSCRIPTION_LANGUAGE
 
     @staticmethod
     def get_api_key() -> str:
