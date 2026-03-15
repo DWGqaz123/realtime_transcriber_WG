@@ -193,7 +193,7 @@ uvicorn main:app --reload
 ### 2. Frontend Setup
 
 1. Open `frontend/YourApp.xcodeproj` in Xcode.
-2. Ensure the backend is running on `http://localhost:8000`.
+2. Ensure the backend is running on the configured host/port.
 3. Build and Run (Cmd + R).
 
 ---

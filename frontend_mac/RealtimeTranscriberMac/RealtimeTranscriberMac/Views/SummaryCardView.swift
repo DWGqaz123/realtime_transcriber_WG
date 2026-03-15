@@ -98,23 +98,17 @@ struct SummaryCardView: View {
             }
         }
         .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(8)
+        .cornerRadius(12)
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 12)
                 .stroke(
-                    // 🔧 最终摘要使用更显眼的边框
                     summary.isFinal
-                        ? Color.orange.opacity(0.5)
-                        : Color.orange.opacity(0.3),
-                    lineWidth: summary.isFinal ? 1.5 : 1
+                        ? Color.orange.opacity(0.4)
+                        : Color.gray.opacity(0.15),
+                    lineWidth: 1
                 )
         )
-        .shadow(
-            color: Color.black.opacity(summary.isFinal ? 0.1 : 0.05),
-            radius: summary.isFinal ? 4 : 2,
-            x: 0,
-            y: summary.isFinal ? 2 : 1
-        )
+        .shadow(color: Color.black.opacity(0.03), radius: 2, x: 0, y: 1)
     }
     
     // 解析 Markdown 格式的项目符号

@@ -24,7 +24,6 @@ class ProjectListViewModel: ObservableObject {
     @Published var selectedSession: RecordingSession?  // 选中的 session
     @Published var showSessionDetail: Bool = false  // 是否显示详情浮窗
     @Published var sessionDetailLoading: Bool = false  // 加载详情中
-    private let baseURL = "http://localhost:8000"
     
     // MARK: - Private Properties
     
@@ -60,12 +59,10 @@ class ProjectListViewModel: ObservableObject {
                 selectedProject = fetchedProjects.first
             }
             
-            print("✅ Loaded \(fetchedProjects.count) projects")
             
         } catch {
             errorMessage = error.localizedDescription
             showError = true
-            print("❌ Failed to load projects: \(error.localizedDescription)")
         }
         
         isLoading = false
@@ -92,12 +89,10 @@ class ProjectListViewModel: ObservableObject {
             self.projects.insert(newProject, at: 0)
             self.selectedProject = newProject
             
-            print("✅ Created project: \(newProject.name)")
             
         } catch {
             errorMessage = error.localizedDescription
             showError = true
-            print("❌ Failed to create project: \(error.localizedDescription)")
         }
         
         isLoading = false
@@ -119,12 +114,10 @@ class ProjectListViewModel: ObservableObject {
                 selectedProject = projects.first
             }
             
-            print("✅ Deleted project: \(project.name)")
             
         } catch {
             errorMessage = error.localizedDescription
             showError = true
-            print("❌ Failed to delete project: \(error.localizedDescription)")
         }
         
         isLoading = false
@@ -133,7 +126,6 @@ class ProjectListViewModel: ObservableObject {
     /// Select a project
     func selectProject(_ project: Project) {
         selectedProject = project
-        print("📁 Selected project: \(project.name)")
     }
     
     // MARK: - Session Management
@@ -143,11 +135,9 @@ class ProjectListViewModel: ObservableObject {
         if expandedProjects.contains(project.id) {
             // 收起
             expandedProjects.remove(project.id)
-            print("📁 Collapsed project: \(project.name)")
         } else {
             // 展开，并加载 sessions（不强制刷新，使用缓存）
             expandedProjects.insert(project.id)
-            print("📂 Expanded project: \(project.name)")
             Task {
                 await loadProjectSessions(project.id)  // 🔧 不传参数，默认 forceRefresh = false
             }
@@ -158,19 +148,15 @@ class ProjectListViewModel: ObservableObject {
     func loadProjectSessions(_ projectId: Int, forceRefresh: Bool = false) async {
         // 如果已经加载过且不强制刷新，跳过
         if !forceRefresh && projectSessions[projectId] != nil {
-            print("📦 Using cached sessions for project \(projectId)")
             return
         }
         
         do {
-            print("🔄 Loading sessions for project \(projectId)...")
             let sessions = try await projectService.fetchProjectSessions(projectId: projectId)
             self.projectSessions[projectId] = sessions
-            print("✅ Loaded \(sessions.count) sessions for project \(projectId)")
         } catch {
             errorMessage = error.localizedDescription
             showError = true
-            print("❌ Failed to load sessions: \(error.localizedDescription)")
         }
     }
 
@@ -211,12 +197,10 @@ class ProjectListViewModel: ObservableObject {
             selectedSession = detailSession
             showSessionDetail = true
             
-            print("✅ Loaded session detail: \(detailSession.transcriptText?.count ?? 0) chars")
             
         } catch {
             errorMessage = error.localizedDescription
             showError = true
-            print("❌ Failed to load session detail: \(error.localizedDescription)")
         }
         
         sessionDetailLoading = false
@@ -231,30 +215,25 @@ class ProjectListViewModel: ObservableObject {
     /// Delete a session
     func deleteSession(projectId: Int, sessionId: Int) async {
         do {
-            print("🗑️ Deleting session \(sessionId) from project \(projectId)")
             
             // 先检查 session 是否在缓存中
             if let sessions = projectSessions[projectId] {
                 let exists = sessions.contains { $0.id == sessionId }
-                print("   Session exists in cache: \(exists)")
             }
             
             try await projectService.deleteSession(projectId: projectId, sessionId: sessionId)
             
-            print("✅ Backend confirmed deletion")
             
             // 从缓存中移除
             if var sessions = projectSessions[projectId] {
                 let beforeCount = sessions.count
                 sessions.removeAll { $0.id == sessionId }
                 projectSessions[projectId] = sessions
-                print("   Removed from cache: \(beforeCount) → \(sessions.count)")
             }
             
             // 关闭详情窗口（如果正在显示被删除的 session）
             if selectedSession?.id == sessionId {
                 closeSessionDetail()
-                print("   Closed session detail sheet")
             }
             
             // 刷新项目信息（更新 session 计数）
@@ -268,13 +247,10 @@ class ProjectListViewModel: ObservableObject {
                         selectedProject = updated
                     }
                 }
-                print("   Updated project: sessions = \(updated.sessionCount)")
             }
             
-            print("✅ Session deleted successfully")
             
         } catch ProjectServiceError.serverError(let statusCode) where statusCode == 404 {
-            print("⚠️ Session \(sessionId) not found (404)")
             
             // 即使 404，也从前端缓存中移除
             if var sessions = projectSessions[projectId] {
@@ -293,14 +269,12 @@ class ProjectListViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             showError = true
-            print("❌ Failed to delete session: \(error.localizedDescription)")
         }
     }
     
     /// Delete a summary
     func deleteSummary(projectId: Int, sessionId: Int, summaryId: Int) async {
         do {
-            print("🗑️ Deleting summary \(summaryId) from session \(sessionId)")
             
             try await projectService.deleteSummary(
                 projectId: projectId,
@@ -308,7 +282,6 @@ class ProjectListViewModel: ObservableObject {
                 summaryId: summaryId
             )
             
-            print("✅ Summary deleted successfully")
             
             // 如果当前显示的 session 就是被修改的，重新加载详情
             if selectedSession?.id == sessionId {
@@ -318,7 +291,6 @@ class ProjectListViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             showError = true
-            print("❌ Failed to delete summary: \(error.localizedDescription)")
         }
     }
     
@@ -343,51 +315,25 @@ class ProjectListViewModel: ObservableObject {
                 await loadProjectSessions(selected.id, forceRefresh: true)
             }
             
-            print("✅ Refreshed project: \(updated.name), sessions: \(updated.sessionCount)")
             
         } catch {
             errorMessage = error.localizedDescription
             showError = true
-            print("❌ Failed to refresh project: \(error.localizedDescription)")
         }
     }
     
     func loadSessions(for projectId: Int) async {
-        print("📡 Loading sessions for project \(projectId)...")
-        
-        guard let url = URL(string: "\(baseURL)/api/projects/\(projectId)/sessions") else {
-            print("❌ Invalid URL")
-            return
-        }
-        
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                print("❌ Bad response")
-                return
-            }
-            
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            
-            let sessions = try decoder.decode([RecordingSession].self, from: data)
-            
-            await MainActor.run {
-                self.projectSessions[projectId] = sessions
-            }
-            
-            print("✅ Loaded \(sessions.count) sessions for project \(projectId)")
-            
+            let sessions = try await projectService.fetchProjectSessions(projectId: projectId)
+            self.projectSessions[projectId] = sessions
         } catch {
-            print("❌ Failed to load sessions: \(error)")
+            errorMessage = error.localizedDescription
+            showError = true
         }
     }
     
     /// 根据 ID 选择 session（用于搜索跳转）
     func selectSessionById(projectId: Int, sessionId: Int) async {
-        print("🔍 Selecting session by ID: project=\(projectId), session=\(sessionId)")
         
         // 1. 确保项目已选中
         if selectedProject?.id != projectId {
@@ -419,9 +365,7 @@ class ProjectListViewModel: ObservableObject {
                 showSessionDetail = true
             }
             
-            print("✅ Session selected and detail opened")
         } else {
-            print("⚠️ Session \(sessionId) not found in project \(projectId)")
             
             // 尝试强制重新加载
             await loadSessions(for: projectId)
@@ -432,10 +376,8 @@ class ProjectListViewModel: ObservableObject {
                     selectedSession = session
                     showSessionDetail = true
                 }
-                print("✅ Session found after reload")
             }
         }
     }
 }
-
 

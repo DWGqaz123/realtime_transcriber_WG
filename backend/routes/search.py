@@ -3,15 +3,22 @@
 """
 
 from fastapi import APIRouter, Query, HTTPException
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel
 
 from embedding_service import get_embedding_service
 from faiss_manager import get_faiss_manager
 from database.db import DatabaseManager
-from database.models import Summary, Session as DBSession
+from database.models import Summary, Session as DBSession, Embedding
 
 router = APIRouter(prefix="/api/search", tags=["search"])
+
+
+def require_project(project_id: int):
+    project = DatabaseManager.get_project_by_id(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    return project
 
 
 # ==================== 数据模型 ====================
@@ -55,28 +62,16 @@ async def search_in_project(
     Returns:
         SearchResponse: 搜索结果
     """
-    print(f"\n{'='*60}")
-    print(f"🔍 Search Request")
-    print(f"   Project: {project_id}")
-    print(f"   Query: '{query}'")
-    print(f"   Top K: {top_k}")
-    print(f"{'='*60}\n")
     
     try:
-        # Step 1: 验证项目存在
-        project = DatabaseManager.get_project_by_id(project_id)
-        if not project:
-            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+        require_project(project_id)
         
         # Step 2: 向量化查询
         embedding_service = get_embedding_service()
-        print(f"🔄 Vectorizing query...")
         query_embedding = embedding_service.embed_text(query)
-        print(f"✅ Query vectorized")
         
         # Step 3: FAISS 向量搜索
         faiss_manager = get_faiss_manager()
-        print(f"🔍 Searching in FAISS index...")
         faiss_results = faiss_manager.search(
             project_id=project_id,
             query_embedding=query_embedding,
@@ -84,57 +79,45 @@ async def search_in_project(
         )
         
         if not faiss_results:
-            print(f"ℹ️  No results found")
             return SearchResponse(
                 query=query,
                 total=0,
                 results=[]
             )
         
-        print(f"✅ Found {len(faiss_results)} results from FAISS")
         
         # Step 4: 从数据库加载完整信息
         db = DatabaseManager.get_db()
         results = []
-        
+
         try:
+            summary_ids = [item.summary_id for item in faiss_results]
+            summary_rows = db.query(Summary, DBSession.mode).join(
+                DBSession, DBSession.id == Summary.session_id
+            ).filter(Summary.id.in_(summary_ids)).all()
+
+            summaries_by_id = {
+                summary.id: (summary, session_mode)
+                for summary, session_mode in summary_rows
+            }
+
             for faiss_result in faiss_results:
-                # 查询 summary 及其关联的 session
-                summary = db.query(Summary).filter(
-                    Summary.id == faiss_result.summary_id
-                ).first()
-                
-                if not summary:
-                    print(f"⚠️  Summary {faiss_result.summary_id} not found in DB")
+                row = summaries_by_id.get(faiss_result.summary_id)
+                if row is None:
                     continue
-                
-                # 查询 session 信息
-                session = db.query(DBSession).filter(
-                    DBSession.id == summary.session_id
-                ).first()
-                
-                if not session:
-                    print(f"⚠️  Session {summary.session_id} not found in DB")
-                    continue
-                
-                # 构建结果
-                result = SearchResult(
+
+                summary, session_mode = row
+                results.append(SearchResult(
                     summary_id=summary.id,
                     content=summary.content,
                     similarity=faiss_result.similarity,
                     session_id=summary.session_id,
-                    session_mode=session.mode,
+                    session_mode=session_mode,
                     created_at=summary.created_at.isoformat() if summary.created_at else ""
-                )
-                results.append(result)
-                
-                print(f"  ✅ [{len(results)}] Summary {summary.id} (similarity: {faiss_result.similarity:.4f})")
-            
+                ))
         finally:
             db.close()
         
-        print(f"\n✅ Search complete: {len(results)} results")
-        print(f"{'='*60}\n")
         
         return SearchResponse(
             query=query,
@@ -145,9 +128,6 @@ async def search_in_project(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Search failed: {e}")
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
@@ -163,10 +143,7 @@ async def get_search_stats(project_id: int):
         dict: 统计信息
     """
     try:
-        # 验证项目存在
-        project = DatabaseManager.get_project_by_id(project_id)
-        if not project:
-            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+        project = require_project(project_id)
         
         # 获取 FAISS 索引信息
         faiss_manager = get_faiss_manager()
@@ -177,17 +154,17 @@ async def get_search_stats(project_id: int):
         try:
             from database.models import Embedding
             
-            total_summaries = db.query(Summary).filter(
-                Summary.project_id == project_id
+            total_summaries = db.query(Summary).join(DBSession).filter(
+                DBSession.project_id == project_id
             ).count()
             
-            indexed_summaries = db.query(Summary).filter(
-                Summary.project_id == project_id,
+            indexed_summaries = db.query(Summary).join(DBSession).filter(
+                DBSession.project_id == project_id,
                 Summary.is_indexed == True
             ).count()
             
-            embeddings_count = db.query(Embedding).filter(
-                Embedding.project_id == project_id
+            embeddings_count = db.query(Embedding).join(Summary).join(DBSession).filter(
+                DBSession.project_id == project_id
             ).count()
             
         finally:
@@ -208,5 +185,4 @@ async def get_search_stats(project_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Failed to get stats: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")

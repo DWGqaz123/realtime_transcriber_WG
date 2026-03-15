@@ -61,8 +61,12 @@ struct CreateProjectSheet: View {
                         .font(.body)
                         .frame(height: 80)
                         .padding(4)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(6)
+                        .background(Color.gray.opacity(0.04))
+                        .cornerRadius(10)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.gray.opacity(0.15), lineWidth: 1)
+                        )
                 }
                 
                 Text("You can organize your recordings by project. All transcripts and sessions will be associated with this project.")
@@ -127,7 +131,6 @@ struct CreateProjectSheet: View {
 
 #Preview {
     CreateProjectSheet { name, description in
-        print("Creating project: \(name)")
         try? await Task.sleep(nanoseconds: 1_000_000_000)
     }
 }

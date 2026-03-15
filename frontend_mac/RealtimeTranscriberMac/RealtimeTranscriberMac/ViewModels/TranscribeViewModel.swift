@@ -8,6 +8,34 @@
 import Foundation
 import Combine
 
+private struct WebSocketEvent: Codable {
+    let type: String
+    let payload: Payload
+
+    struct Payload: Codable {
+        let id: Int?
+        let content: String?
+        let created_at: String?
+        let text: String?
+        let message: String?
+        let status: String?
+        let project_id: Int?
+        let mode: String?
+        let is_final: Bool?
+        let sentence_count: Int?
+        let session_id: Int?
+        let duration: Int?
+        let sentences: Int?
+        let characters: Int?
+        let summaries: Int?
+        let indexed_count: Int?
+    }
+}
+
+private struct SummaryTimingConfig: Decodable {
+    let summary_interval_seconds: Int
+}
+
 enum RecordingMode: String, CaseIterable, Identifiable {
     case lecture
     case discussion
@@ -44,12 +72,6 @@ final class TranscribeViewModel: ObservableObject {
     @Published var isDetectingSound: Bool = false
     @Published var recordingDuration: TimeInterval = 0.0
     
-    // 静音检测和流量统计
-    @Published var isSilent: Bool = false
-    @Published var totalChunks: Int = 0
-    @Published var sentChunks: Int = 0
-    @Published var skippedChunks: Int = 0
-    @Published var trafficSavedPercent: Int = 0
     // 摘要列表
     @Published var summaries: [Summary] = []
     
@@ -63,25 +85,70 @@ final class TranscribeViewModel: ObservableObject {
     private var summaryCountdownTimer: Timer?
 
     // 🔧 新增：配置常量
-    private let summaryIntervalSeconds: Int = 30  // 与后端配置一致
+    @Published private(set) var summaryIntervalSeconds: Int = 30
     
     // MARK: - Private Properties
     
     private let client = TranscriptionClient()
     private let audioCapture = AudioCaptureService()
+    private let apiClient = APIClient()
     private var recordingTimer: Timer?
-    private var recordingStartTime: Date?  // 🔧 添加录音开始时间
+    private let summaryDecoder = JSONDecoder()
  
     
     // MARK: - Initialization
     
     init() {
+        configureDecoders()
         setupTranscriptionClient()
         setupAudioCapture()
         checkMicrophonePermission()
+        Task {
+            await loadSummaryTimingConfig()
+        }
+    }
+    
+    deinit {
+        recordingTimer?.invalidate()
+        summaryCountdownTimer?.invalidate()
     }
     
     // MARK: - Setup Methods
+
+    private func configureDecoders() {
+        summaryDecoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let dateString = try container.decode(String.self)
+
+            let formatter1 = DateFormatter()
+            formatter1.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+            formatter1.locale = Locale(identifier: "en_US_POSIX")
+            formatter1.timeZone = TimeZone(secondsFromGMT: 0)
+
+            if let date = formatter1.date(from: dateString) {
+                return date
+            }
+
+            let formatter2 = DateFormatter()
+            formatter2.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+            formatter2.locale = Locale(identifier: "en_US_POSIX")
+            formatter2.timeZone = TimeZone(secondsFromGMT: 0)
+
+            if let date = formatter2.date(from: dateString) {
+                return date
+            }
+
+            let iso8601Formatter = ISO8601DateFormatter()
+            if let date = iso8601Formatter.date(from: dateString) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Cannot decode date: \(dateString)"
+            )
+        }
+    }
     
     private func setupTranscriptionClient() {
         // 处理来自后端的消息
@@ -105,25 +172,6 @@ final class TranscribeViewModel: ObservableObject {
             Task { @MainActor in
                 self.audioLevel = level
                 self.isDetectingSound = level > 0.01
-            }
-        }
-        
-        // 监听静音状态变化
-        audioCapture.onSilenceStateChanged = { [weak self] isSilent in
-            guard let self = self else { return }
-            Task { @MainActor in
-                self.isSilent = isSilent
-            }
-        }
-        
-        // 监听统计信息更新
-        audioCapture.onStatisticsUpdated = { [weak self] total, sent, skipped in
-            guard let self = self else { return }
-            Task { @MainActor in
-                self.totalChunks = total
-                self.sentChunks = sent
-                self.skippedChunks = skipped
-                self.trafficSavedPercent = total > 0 ? Int(Double(skipped) / Double(total) * 100) : 0
             }
         }
     }
@@ -152,9 +200,9 @@ final class TranscribeViewModel: ObservableObject {
             guard let self = self else { return }
             
             Task { @MainActor in
+                await self.loadSummaryTimingConfig()
                 // 检查权限
                 if !granted {
-                    print("❌ Cannot start recording: Microphone permission denied")
                     self.permissionStatus = "Denied - Check System Settings ❌"
                     self.showPermissionAlert = true
                     return
@@ -164,7 +212,6 @@ final class TranscribeViewModel: ObservableObject {
                 
                 // 🔧 检查项目 ID
                 guard let projectId = self.currentProjectId else {
-                    print("❌ No project selected")
                     self.currentSubtitle = "Please select a project first"
                     self.permissionStatus = "No project selected ⚠️"
                     return
@@ -179,23 +226,13 @@ final class TranscribeViewModel: ObservableObject {
                     // 新会话，无需操作
                 } else {
                     // 继续使用现有 fullTranscript，不清空
-                    print("📝 Continuing previous session, transcript preserved")
                 }
-                
                 
                 
                 self.permissionStatus = "Recording... 🎤"
                 self.recordingDuration = 0.0
                 self.audioLevel = 0.0
                 self.isDetectingSound = false
-                self.isSilent = false
-                self.recordingStartTime = Date()
-                
-                // 重置统计
-                self.totalChunks = 0
-                self.sentChunks = 0
-                self.skippedChunks = 0
-                self.trafficSavedPercent = 0
                 
                 // 启动录音计时器
                 self.recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -210,21 +247,17 @@ final class TranscribeViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1秒
                 // 2. 🔧 发送项目 ID
                 self.client.send(text: "PROJECT_ID:\(projectId)")
-                print("📁 Sent project ID: \(projectId)")
                 
                 // 3. 发送模式配置
                 let modeString = self.mode.rawValue
                 self.client.send(text: "MODE:\(modeString)")
-                print("📡 Sent mode: \(modeString)")
                 
                 // 4. 开始音频采集
                 do {
                     try self.audioCapture.start()
-                    print("✅ Recording started successfully")
                     // 🔧 启动摘要倒计时
                     self.startSummaryCountdown()
                 } catch {
-                    print("❌ Failed to start audio capture: \(error)")
                     self.currentSubtitle = "Error: \(error.localizedDescription)"
                     self.isRecording = false
                     self.recordingTimer?.invalidate()
@@ -239,15 +272,12 @@ final class TranscribeViewModel: ObservableObject {
         
         // 🔧 在停止前，将 currentSubtitle 添加到 fullTranscript
         if !currentSubtitle.isEmpty {
-            print("📝 Committing current subtitle to transcript before stop")
-            print("   Current subtitle: \(currentSubtitle)")
             
             if !fullTranscript.isEmpty {
                 fullTranscript += "\n"
             }
             fullTranscript += currentSubtitle
             
-            print("✅ Committed, clearing currentSubtitle")
         }
         
         isRecording = false
@@ -270,19 +300,15 @@ final class TranscribeViewModel: ObservableObject {
         // 重置音频状态
         audioLevel = 0
         isDetectingSound = false
-        isSilent = false
         
-        print("🛑 Recording stopped (Session kept alive for saving)")
     }
     
     func saveSession() {
         guard !fullTranscript.isEmpty else {
-            print("⚠️ No transcript to save")
             currentSubtitle = "No transcript to save"
             return
         }
         
-        print("💾 Saving session...")
         currentSubtitle = "Saving session..."
         
         // send save command
@@ -297,211 +323,100 @@ final class TranscribeViewModel: ObservableObject {
     // MARK: - Transcript Handling
     
     private func handleTranscriptMessage(_ text: String) {
-        if text.hasPrefix("[config]") {
-            print("Config: \(text)")
-            
-        } else if text.hasPrefix("[partial]") {
-            let content = text.replacingOccurrences(of: "[partial] ", with: "")
-            self.currentSubtitle = content
-            
-        } else if text.hasPrefix("[final]") {
-            let content = text.replacingOccurrences(of: "[final] ", with: "")
-            self.currentSubtitle = ""
-            
-            if !self.fullTranscript.isEmpty {
-                self.fullTranscript += "\n"
-            }
-            self.fullTranscript += content
-            
-        } else if text.hasPrefix("[indexing_start]") {
-            // 🔧 索引开始
-            print("📇 Indexing started")
-            
-        } else if text.hasPrefix("[indexing_complete]") {
-            // 🔧 索引完成
-            let jsonString = text.replacingOccurrences(of: "[indexing_complete] ", with: "")
-            print("✅ Indexing complete: \(jsonString)")
-            
-        } else if text.hasPrefix("[indexing_error]") {
-            // 🔧 索引失败
-            let jsonString = text.replacingOccurrences(of: "[indexing_error] ", with: "")
-            print("❌ Indexing error: \(jsonString)")
-            
-        } else if text.hasPrefix("[save]") {
-            // save
-            let content = text.replacingOccurrences(of: "[save] ", with: "")
-            print("💾 Save response: \(content)")
-            
-            if content.contains("successfully") {
-                self.currentSubtitle = "✅ Session saved successfully"
-                
-                // clear info after 3 s
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                    if self.currentSubtitle.contains("saved successfully") {
-                        self.currentSubtitle = ""
-                    }
-                }
-                
-                // clear
-                self.client.disconnect()
-                self.fullTranscript = ""
-                self.summaries.removeAll()
-                self.permissionStatus = "Ready to record 🎤"
-                
-            } else if content.contains("ERROR") {
-                self.currentSubtitle = "❌ \(content)"
-            } else if content.contains("already saved") {
-                self.currentSubtitle = "⚠️ Session already saved"
-                self.summaries.removeAll()
-            }
-            
-        } else if text.hasPrefix("[summary_start]") {
-            // 🔧 常规摘要开始信号
-            self.isGeneratingSummary = true
-            self.summaryGenerationProgress = "🤖 Generating summary..."
-            print("🤖 Summary generation started")
-            
-        } else if text.hasPrefix("[final_summary_start]") {
-            // 🔧 新增：最终摘要开始信号
-            self.isGeneratingSummary = true
-            self.summaryGenerationProgress = "🏁 Generating final summary of entire recording..."
-            print("🏁 Final summary generation started")
-            
-        } else if text.hasPrefix("[summary]") {
-            // 处理摘要消息
-            let jsonString = text.replacingOccurrences(of: "[summary] ", with: "")
-            print("📝 Received summary JSON: \(jsonString.prefix(100))...")
-            
-            do {
-                let jsonData = jsonString.data(using: .utf8)!
-                let decoder = JSONDecoder()
-                
-                // 🔧 修改：使用更简单的日期解码策略
-                decoder.dateDecodingStrategy = .custom { decoder in
-                    let container = try decoder.singleValueContainer()
-                    let dateString = try container.decode(String.self)
-                    
-                    // 尝试多种格式
-                    // 格式 1: 2025-12-08T23:19:23.703617
-                    let formatter1 = DateFormatter()
-                    formatter1.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-                    formatter1.locale = Locale(identifier: "en_US_POSIX")
-                    formatter1.timeZone = TimeZone(secondsFromGMT: 0)
-                    
-                    if let date = formatter1.date(from: dateString) {
-                        return date
-                    }
-                    
-                    // 格式 2: 2025-12-08T23:19:23
-                    let formatter2 = DateFormatter()
-                    formatter2.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-                    formatter2.locale = Locale(identifier: "en_US_POSIX")
-                    formatter2.timeZone = TimeZone(secondsFromGMT: 0)
-                    
-                    if let date = formatter2.date(from: dateString) {
-                        return date
-                    }
-                    
-                    // 格式 3: 标准 ISO8601
-                    let iso8601Formatter = ISO8601DateFormatter()
-                    if let date = iso8601Formatter.date(from: dateString) {
-                        return date
-                    }
-                    
-                    throw DecodingError.dataCorruptedError(
-                        in: container,
-                        debugDescription: "Cannot decode date: \(dateString)"
-                    )
-                }
-                
-                let summary = try decoder.decode(Summary.self, from: jsonData)
-                
-                // 🔧 检查是否是最终摘要
-                let isFinal = summary.isFinal
-                
-                print("✅ Decoded summary successfully!")
-                print("   ID: \(summary.id)")
-                print("   Is Final: \(isFinal)")
-                print("   Content length: \(summary.content.count) chars")
-                
-                // 🔧 标记生成完成
-                self.isGeneratingSummary = false
-                
-                // 添加到列表（最新的在前面）
-                self.summaries.insert(summary, at: 0)
-                
-                print("📝 Summary added to list, total: \(self.summaries.count)")
-                
-                // 🔧 重置倒计时
-                self.resetSummaryCountdown()
-                
-                // 🔧 根据是否是最终摘要显示不同提示
-                if isFinal {
-                    // 最终摘要的特殊提示
-                    self.currentSubtitle = "🏁 Final summary generated!"
-                    print("🏁 Final summary received and displayed")
-                } else {
-                    // 常规摘要提示
-                    self.currentSubtitle = "✨ New summary generated!"
-                    print("✨ Regular summary received and displayed")
-                }
-                
-                // 3秒后清除提示
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                    if self.currentSubtitle.contains("summary generated") {
-                        self.currentSubtitle = ""
-                    }
-                }
-                
-            } catch DecodingError.dataCorrupted(let context) {
-                print("❌ Decoding error - data corrupted:")
-                print("   \(context.debugDescription)")
-                print("   JSON: \(jsonString)")
-                
-                // 🔧 错误时也标记生成完成
-                self.isGeneratingSummary = false
-                
-            } catch DecodingError.keyNotFound(let key, let context) {
-                print("❌ Decoding error - key not found:")
-                print("   Key: \(key)")
-                print("   \(context.debugDescription)")
-                print("   JSON: \(jsonString)")
-                
-                // 🔧 错误时也标记生成完成
-                self.isGeneratingSummary = false
-                
-            } catch {
-                print("❌ Failed to decode summary: \(error)")
-                print("   JSON: \(jsonString)")
-                
-                // 🔧 错误时也标记生成完成
-                self.isGeneratingSummary = false
-            }
-            
-        } else {
+        guard let data = text.data(using: .utf8),
+              let event = try? JSONDecoder().decode(WebSocketEvent.self, from: data) else {
             self.currentSubtitle = text
+            return
         }
+
+        switch event.type {
+        case "config", "status", "echo":
+            break
+        case "partial":
+            currentSubtitle = event.payload.text ?? ""
+        case "final":
+            let content = event.payload.text ?? ""
+            currentSubtitle = ""
+            if !fullTranscript.isEmpty {
+                fullTranscript += "\n"
+            }
+            fullTranscript += content
+        case "summary_started":
+            isGeneratingSummary = true
+            if event.payload.is_final == true {
+                summaryGenerationProgress = "🏁 Generating final summary of entire recording..."
+            } else {
+                summaryGenerationProgress = "🤖 Generating summary..."
+            }
+        case "summary":
+            handleSummaryEvent(from: data)
+        case "save_complete":
+            currentSubtitle = "✅ Session saved successfully"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                if self.currentSubtitle.contains("saved successfully") {
+                    self.currentSubtitle = ""
+                }
+            }
+            client.disconnect()
+            fullTranscript = ""
+            summaries.removeAll()
+            permissionStatus = "Ready to record 🎤"
+        case "save_status":
+            handleSaveStatus(event.payload)
+        case "indexing_start":
+            break
+        case "indexing_complete":
+            break
+        case "indexing_error":
+            errorMessageIfPresent(event.payload.message ?? "Indexing failed")
+        case "error":
+            errorMessageIfPresent(event.payload.message ?? "Unknown error")
+        default:
+            if let message = event.payload.message ?? event.payload.text {
+                currentSubtitle = message
+            }
+        }
+    }
+
+    private func handleSummaryEvent(from data: Data) {
+        do {
+            let event = try summaryDecoder.decode(WebSocketEvent.self, from: data)
+            let payloadData = try JSONEncoder().encode(event.payload)
+            let summary = try JSONDecoder().decode(Summary.self, from: payloadData)
+
+            isGeneratingSummary = false
+            summaries.insert(summary, at: 0)
+            resetSummaryCountdown()
+
+            currentSubtitle = summary.isFinal ? "🏁 Final summary generated!" : "✨ New summary generated!"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                if self.currentSubtitle.contains("summary generated") {
+                    self.currentSubtitle = ""
+                }
+            }
+        } catch {
+            isGeneratingSummary = false
+        }
+    }
+
+    private func handleSaveStatus(_ payload: WebSocketEvent.Payload) {
+        switch payload.status {
+        case "error":
+            currentSubtitle = "❌ \(payload.message ?? "Save failed")"
+        default:
+            if let message = payload.message {
+                currentSubtitle = message
+            }
+        }
+    }
+
+    private func errorMessageIfPresent(_ message: String) {
+        currentSubtitle = "❌ \(message)"
+        isGeneratingSummary = false
     }
     
     func clearSummaries() {
         summaries.removeAll()
-        print("🗑️ Summaries cleared")
-    }
-    // 🔧 添加辅助方法（在类外部或作为扩展）
-    private func parseCustomISO8601(_ dateString: String) -> Date? {
-        // 格式: 2025-12-08T23:19:23.703617
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        
-        if let date = formatter.date(from: dateString) {
-            return date
-        }
-        
-        // 尝试不带微秒的格式
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        return formatter.date(from: dateString)
     }
     
     // MARK: - Computed Properties
@@ -516,11 +431,6 @@ final class TranscribeViewModel: ObservableObject {
     var sentenceCount: Int {
         guard !fullTranscript.isEmpty else { return 0 }
         return fullTranscript.components(separatedBy: "\n").filter { !$0.isEmpty }.count
-    }
-    
-    var formattedTrafficSaved: String {
-        let savedKB = (skippedChunks * 3200) / 1024  // 假设每块 3200 bytes
-        return "\(savedKB) KB"
     }
     
     // MARK: - Summary Progress Management
@@ -541,7 +451,6 @@ final class TranscribeViewModel: ObservableObject {
             }
         }
         
-        print("⏱️ Summary countdown started")
     }
 
     /// 更新倒计时
@@ -569,13 +478,25 @@ final class TranscribeViewModel: ObservableObject {
         summaryCountdownTimer = nil
         nextSummaryCountdown = 0
         summaryGenerationProgress = ""
-        print("⏹️ Summary countdown stopped")
     }
 
     /// 重置倒计时（摘要生成后）
     private func resetSummaryCountdown() {
         lastSummaryTimestamp = Date()
         nextSummaryCountdown = summaryIntervalSeconds
-        print("🔄 Summary countdown reset")
+    }
+
+    private func loadSummaryTimingConfig() async {
+        do {
+            let config: SummaryTimingConfig = try await apiClient.get("api/config/summary")
+            if config.summary_interval_seconds > 0 {
+                summaryIntervalSeconds = config.summary_interval_seconds
+                if nextSummaryCountdown > summaryIntervalSeconds {
+                    nextSummaryCountdown = summaryIntervalSeconds
+                }
+            }
+        } catch {
+            // Keep the current local value as fallback if backend is unavailable.
+        }
     }
 }

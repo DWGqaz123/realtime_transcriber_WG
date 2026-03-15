@@ -35,7 +35,8 @@ echo -e "${YELLOW}📦 Step 1: 查找 App...${NC}"
 
 # 可能的位置
 POSSIBLE_PATHS=(
-    "/Users/dwg/RealtimeTranscriberMac/RealtimeTranscriberMac.app"  # ← 添加你的路径
+    "./RealtimeTranscriberMac 2026-03-09 22-09-10/RealtimeTranscriberMac.app"
+    "/Users/dwg/RealtimeTranscriberMac/RealtimeTranscriberMac.app"
     "$HOME/Desktop/RealtimeTranscriberMac/RealtimeTranscriberMac.app"
     "./RealtimeTranscriberMac.app"
     "$HOME/Desktop/RealtimeTranscriberMac.app"

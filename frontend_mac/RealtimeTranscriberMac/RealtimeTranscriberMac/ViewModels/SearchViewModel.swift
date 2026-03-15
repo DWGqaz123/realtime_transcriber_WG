@@ -1,4 +1,3 @@
-import SwiftUI
 import Foundation
 import Combine
 // MARK: - Data Models
@@ -46,7 +45,7 @@ class SearchViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var hasSearched: Bool = false
     
-    private let baseURL = "http://localhost:8000"
+    private let searchService = SearchService()
     
     func search(in projectId: Int, topK: Int = 10) async {
         guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -59,38 +58,15 @@ class SearchViewModel: ObservableObject {
         hasSearched = true
         results = []
         
-        print("🔍 Searching for: '\(searchQuery)' in project \(projectId)")
         
         do {
-            // URL encode the query
-            guard let encodedQuery = searchQuery.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                  let url = URL(string: "\(baseURL)/api/search/projects/\(projectId)?query=\(encodedQuery)&top_k=\(topK)") else {
-                throw URLError(.badURL)
-            }
-            
-            print("📡 Request URL: \(url.absoluteString)")
-            
-            let (data, response) = try await URLSession.shared.data(from: url)
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw URLError(.badServerResponse)
-            }
-            
-            print("📡 Response status: \(httpResponse.statusCode)")
-            
-            guard httpResponse.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
-            
-            let decoder = JSONDecoder()
-            let searchResponse = try decoder.decode(SearchResponse.self, from: data)
-            
+            let searchResponse = try await searchService.search(
+                projectId: projectId,
+                query: searchQuery.trimmingCharacters(in: .whitespaces),
+                topK: topK
+            )
             self.results = searchResponse.results
-            
-            print("✅ Search completed: \(searchResponse.total) results")
-            
         } catch {
-            print("❌ Search failed: \(error)")
             errorMessage = "Search failed: \(error.localizedDescription)"
         }
         

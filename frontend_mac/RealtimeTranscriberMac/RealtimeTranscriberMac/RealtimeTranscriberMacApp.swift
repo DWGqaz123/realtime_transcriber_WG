@@ -20,9 +20,7 @@ struct RealtimeTranscriberMacApp: App {
                     // 🔧 设置通知监听器
                     setupNotificationObservers()
                     
-                    if let error = backendManager.error {
-                        print("⚠️ Backend startup error: \(error)")
-                    }
+
                 }
         }
         .commands {
@@ -63,19 +61,13 @@ struct RealtimeTranscriberMacApp: App {
             object: nil,
             queue: .main
         ) { [backendManager] _ in
-            print("🔄 Received restart backend notification")
-            print("🛑 Stopping backend...")
-            
             // 停止后端
             backendManager.stopBackend()
             
             // 延迟 1 秒后重启
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                print("🚀 Starting backend with new API keys...")
                 backendManager.startBackend()
             }
         }
-        
-        print("✅ Notification observers set up")
     }
 }

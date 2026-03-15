@@ -96,7 +96,8 @@ struct SearchView: View {
             .disabled(viewModel.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isSearching)
         }
         .padding()
-        .background(Color.gray.opacity(0.05))
+        .background(Color.gray.opacity(0.03))
+
     }
     
     // MARK: - Results List
@@ -287,9 +288,12 @@ struct SearchResultCard: View {
                 }
             }
             .padding()
-            .background(Color.white)
+            .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(12)
-            .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.gray.opacity(0.12), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)  // 🔧 使用 plain 样式避免默认按钮样式
         .contentShape(Rectangle())  // 🔧 整个卡片可点击
@@ -314,7 +318,6 @@ struct SearchResultCard: View {
             sessionCount: 0
         ),
         onSelectSession: { sessionId in
-            print("Preview: Selected session \(sessionId)")
         }
     )
 }

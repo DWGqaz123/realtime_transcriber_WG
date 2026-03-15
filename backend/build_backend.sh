@@ -13,7 +13,7 @@ if [ -z "$CONDA_EXE" ]; then
 fi
 
 # 检查当前环境
-CURRENT_ENV=$(conda info --envs | grep '*' | awk '{print $1}')
+CURRENT_ENV="${CONDA_DEFAULT_ENV:-}"
 if [ "$CURRENT_ENV" != "realtime_transcriber_env" ]; then
     echo "❌ 当前环境不是 realtime_transcriber_env"
     echo "请先运行: conda activate realtime_transcriber_env"

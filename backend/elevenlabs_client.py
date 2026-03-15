@@ -1,17 +1,4 @@
-# backend/elevenlabs_client.py (Improved Version)
-
-import base64
-import json
-import asyncio
-from dataclasses import dataclass
-from typing import Callable, Optional, Any
-from urllib.parse import urlencode
-import httpx
-import websockets
-
-
-
-# backend/elevenlabs_client.py (Improved Version)
+# backend/elevenlabs_client.py
 
 import os
 import base64
@@ -22,8 +9,13 @@ from typing import Callable, Optional, Any
 from urllib.parse import urlencode
 import httpx
 import websockets
+import ssl
 
-
+try:
+    import certifi
+    CERT_PATH = certifi.where()
+except ImportError:
+    CERT_PATH = None
 
 @dataclass
 class ElevenLabsConfig:
@@ -70,38 +62,13 @@ class ElevenLabsRealtimeClient:
             api_key: ElevenLabs API key (from environment or config)
             config: ElevenLabsConfig instance with connection parameters
         """
-        # 🔧 新增：详细的初始化日志
-        print(f"\n{'='*60}")
-        print(f"🎤 ElevenLabsRealtimeClient Initialization")
-        print(f"{'='*60}")
-        
         # 从多个来源尝试获取 API key
         self.api_key = api_key or os.getenv("ELEVENLABS_API_KEY") or ""
         
-        # 详细日志
-        print(f"📊 API Key Sources:")
-        print(f"   1. Constructor param: {'[PROVIDED]' if api_key else '[EMPTY]'}")
-        print(f"   2. Environment var:   {'[SET]' if os.getenv('ELEVENLABS_API_KEY') else '[NOT SET]'}")
-        print(f"   3. Final api_key:     {'[SET]' if self.api_key else '[NOT SET]'}")
-        
-        if self.api_key:
-            print(f"   ✅ API Key preview: {self.api_key[:10]}...{self.api_key[-4:]}")
-        else:
-            print(f"   ❌ NO API KEY AVAILABLE!")
-        
-        print(f"\n📋 Configuration:")
-        print(f"   Mode: {config.mode}")
-        print(f"   Model: {config.model_id}")
-        print(f"   Audio Format: {config.audio_format}")
-        print(f"   Sample Rate: {config.sample_rate}")
-        print(f"   Commit Strategy: {config.commit_strategy}")
-        print(f"   Language: {config.language_code or 'auto-detect'}")
-        print(f"{'='*60}\n")
         
         # 如果没有 API key，立即抛出错误
         if not self.api_key:
             error_msg = "No API key provided, cannot connect"
-            print(f"❌ FATAL: {error_msg}")
             raise ValueError(error_msg)
         
         self.config = config
@@ -111,13 +78,12 @@ class ElevenLabsRealtimeClient:
 
         self._ws: Any = None
         self._connected: bool = False
-        self._last_chunk_had_audio: bool = False  # Track if we've sent audio since last commit
+        self._last_chunk_had_audio: bool = False
         
-        # 🔧 新增：连接健康检查
-        self._last_audio_time: float = 0.0  # 最后发送音频的时间
-        self._reconnect_lock = asyncio.Lock()  # 重连锁，避免并发重连
+        # 连接健康检查
+        self._last_audio_time: float = 0.0
+        self._reconnect_lock = asyncio.Lock()
         
-        print(f"✅ ElevenLabsRealtimeClient initialized successfully")
 
     async def _fetch_single_use_token(self) -> str:
         """
@@ -132,67 +98,24 @@ class ElevenLabsRealtimeClient:
         """
         if not self.api_key:
             error_msg = "ELEVENLABS_API_KEY is not set"
-            print(f"❌ {error_msg}")
             raise RuntimeError(error_msg)
 
         url = "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe"
         headers = {"xi-api-key": self.api_key}
 
-        # 🔧 添加详细日志
-        print(f"\n{'='*60}")
-        print(f"🔑 Fetching ElevenLabs single-use token")
-        print(f"   URL: {url}")
-        print(f"   API Key: {self.api_key[:10]}...{self.api_key[-4:]}")
-        print(f"   Mode: {self.config.mode if hasattr(self.config, 'mode') else 'N/A'}")
-        print(f"   Commit Strategy: {self.config.commit_strategy}")
-        print(f"{'='*60}\n")
-
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                print(f"📡 Sending POST request to ElevenLabs...")
-                resp = await client.post(url, headers=headers)
-                
-                print(f"📡 Response status: {resp.status_code}")
-                
-                if resp.status_code != 200:
-                    error_text = resp.text
-                    print(f"❌ API Error Response:")
-                    print(f"   Status: {resp.status_code}")
-                    print(f"   Body: {error_text}")
-                    
-                    # 特殊处理常见错误
-                    if resp.status_code == 401:
-                        print(f"\n⚠️  Authentication failed - API key is invalid or expired")
-                    elif resp.status_code == 403:
-                        print(f"\n⚠️  Access forbidden - check your API key permissions")
-                    
-                    resp.raise_for_status()  # 抛出异常
-                
-                data = resp.json()
-                print(f"✅ Response data: {data}")
-
-            token = data.get("token")
-            if not token:
-                print(f"❌ No token in response!")
-                print(f"   Response data: {data}")
-                raise RuntimeError("Failed to obtain single-use token from ElevenLabs")
-
-            print(f"✅ Got token: {token[:20]}...{token[-10:]}")
-            return token
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, headers=headers)
             
-        except httpx.HTTPStatusError as e:
-            print(f"❌ HTTP Error: {e}")
-            print(f"   Status: {e.response.status_code}")
-            print(f"   Body: {e.response.text}")
-            raise
-        except httpx.RequestError as e:
-            print(f"❌ Request Error: {e}")
-            raise
-        except Exception as e:
-            print(f"❌ Unexpected Error: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+            if resp.status_code != 200:
+                resp.raise_for_status()
+            
+            data = resp.json()
+
+        token = data.get("token")
+        if not token:
+            raise RuntimeError("Failed to obtain single-use token from ElevenLabs")
+
+        return token
 
     async def connect(self) -> None:
         """
@@ -207,27 +130,16 @@ class ElevenLabsRealtimeClient:
         - RuntimeError if no API key is provided
         - Various exceptions if connection fails
         """
-        print(f"\n{'='*60}")
-        print(f"🔌 ElevenLabs Connection Process Starting")
-        print(f"{'='*60}")
         
         if self._connected:
-            print("[ElevenLabsRealtimeClient] Already connected, skipping")
             return
 
         if not self.api_key:
             error_msg = "No API key provided, cannot connect"
-            print(f"❌ {error_msg}")
             raise RuntimeError(error_msg)
 
         # 1) Get single-use token
-        try:
-            print(f"📡 Step 1: Fetching single-use token...")
-            token = await self._fetch_single_use_token()
-            print(f"✅ Step 1 complete: Token obtained")
-        except Exception as exc:
-            print(f"❌ Step 1 failed: {exc}")
-            raise
+        token = await self._fetch_single_use_token()
 
         # 2) Build WebSocket URL with all parameters
         base_url = "wss://api.elevenlabs.io/v1/speech-to-text/realtime"
@@ -257,34 +169,34 @@ class ElevenLabsRealtimeClient:
                 params["min_silence_duration_ms"] = str(self.config.min_silence_duration_ms)
 
         url = f"{base_url}?{urlencode(params)}"
-        print(f"📡 Step 2: Connecting to WebSocket...")
-        print(f"   URL: {url[:100]}...")
-        print(f"   Params: {list(params.keys())}")
 
         # 3) Connect to WebSocket
         try:
+            # 🔧 配置 WebSocket SSL
+            if CERT_PATH:
+                ssl_context = ssl.create_default_context(cafile=CERT_PATH)
+            else:
+                ssl_context = ssl.create_default_context()
+            
             self._ws = await websockets.connect(
                 url,
                 max_size=16 * 1024 * 1024,  # 16MB max message size
-                ping_interval=20,  # 🔧 新增：每20秒发送ping保持连接
-                ping_timeout=10,   # 🔧 新增：ping超时10秒
+                ping_interval=20,
+                ping_timeout=10,
+                ssl=ssl_context  # ← 添加 SSL 上下文
             )
-            print(f"✅ Step 2 complete: WebSocket connected")
         except Exception as exc:
-            print(f"❌ Step 2 failed: {exc}")
             self._connected = False
             self._ws = None
             raise
 
         self._connected = True
-        self._last_audio_time = asyncio.get_event_loop().time()  # 🔧 新增：记录连接时间
+        self._last_audio_time = asyncio.get_event_loop().time()
         
-        print(f"\n{'='*60}")
-        print(f"✅ ElevenLabs Connection Established Successfully")
-        print(f"{'='*60}\n")
 
         # Start background receive loop
         asyncio.create_task(self._receive_loop())
+        
 
     async def send_audio_chunk(self, audio_bytes: bytes) -> None:
         """
@@ -302,24 +214,19 @@ class ElevenLabsRealtimeClient:
         """
         # 🔧 新增：检查连接状态
         if not self._connected or self._ws is None or self._ws.close_code:
-            print("[ElevenLabsRealtimeClient] ⚠️ Connection lost, attempting to reconnect...")
             
             # 使用锁避免多次并发重连
             async with self._reconnect_lock:
                 # 双重检查：可能其他协程已经重连成功
                 if not self._connected or self._ws is None or self._ws.close_code:
                     try:
-                        print("[ElevenLabsRealtimeClient] Reconnecting...")
                         await self.close()  # 先清理旧连接
                         await self.connect()  # 重新连接
-                        print("[ElevenLabsRealtimeClient] ✅ Reconnected successfully")
                     except Exception as e:
-                        print(f"[ElevenLabsRealtimeClient] ❌ Reconnection failed: {e}")
                         return  # 跳过这个音频块
         
         # 再次检查连接（重连可能失败）
         if not self._connected or self._ws is None:
-            print("[ElevenLabsRealtimeClient] Cannot send audio, not connected after reconnect attempt")
             return
 
         # 🔧 新增：更新最后发送时间
@@ -341,10 +248,8 @@ class ElevenLabsRealtimeClient:
             await self._ws.send(json.dumps(payload))
             self._last_chunk_had_audio = True
         except websockets.exceptions.ConnectionClosed as exc:
-            print(f"[ElevenLabsRealtimeClient] ❌ Connection closed during send: {exc}")
             self._connected = False
         except Exception as exc:
-            print(f"[ElevenLabsRealtimeClient] Failed to send audio chunk: {exc}")
             raise
 
     async def send_commit(self) -> None:
@@ -359,11 +264,9 @@ class ElevenLabsRealtimeClient:
         No-op if not connected or if commit strategy is VAD.
         """
         if not self._connected or self._ws is None:
-            print("[ElevenLabsRealtimeClient] Cannot send commit, not connected")
             return
 
         if self.config.commit_strategy != "manual":
-            print("[ElevenLabsRealtimeClient] Commit signal only relevant for manual strategy")
             return
 
         if not self._last_chunk_had_audio:
@@ -381,9 +284,7 @@ class ElevenLabsRealtimeClient:
         try:
             await self._ws.send(json.dumps(payload))
             self._last_chunk_had_audio = False
-            print("[ElevenLabsRealtimeClient] Sent manual commit signal")
         except Exception as exc:
-            print(f"[ElevenLabsRealtimeClient] Failed to send commit: {exc}")
             raise
 
     async def _receive_loop(self) -> None:
@@ -406,14 +307,12 @@ class ElevenLabsRealtimeClient:
                 try:
                     msg = json.loads(raw)
                 except Exception as exc:
-                    print(f"[ElevenLabsRealtimeClient] Failed to parse message: {exc}")
                     continue
 
                 msg_type = msg.get("message_type") or msg.get("type")
 
                 if msg_type in ("session_started", "sessionStarted"):
                     session_id = msg.get("session_id", "unknown")
-                    print(f"[ElevenLabsRealtimeClient] Session started: {session_id}")
 
                 elif msg_type in ("partial_transcript", "partialTranscript"):
                     text = msg.get("transcript") or msg.get("text") or ""
@@ -431,20 +330,15 @@ class ElevenLabsRealtimeClient:
 
                 elif msg_type and "error" in msg_type.lower():
                     error_msg = msg.get("message", msg.get("error", str(msg)))
-                    print(f"[ElevenLabsRealtimeClient] Error from server: {error_msg}")
 
                 else:
-                    # Unknown message type, log for debugging
-                    print(f"[ElevenLabsRealtimeClient] Unknown message type: {msg_type}")
+                    pass  # Unknown message type
 
         except asyncio.CancelledError:
-            print("[ElevenLabsRealtimeClient] Receive loop cancelled")
             raise
         except websockets.exceptions.ConnectionClosed as exc:
-            print(f"[ElevenLabsRealtimeClient] Connection closed: {exc}")
             self._connected = False
         except Exception as exc:
-            print(f"[ElevenLabsRealtimeClient] Receive loop error: {exc}")
             self._connected = False
         
     def is_alive(self) -> bool:
@@ -467,17 +361,6 @@ class ElevenLabsRealtimeClient:
             # 如果没有 close_code 属性，假设连接存活
             return self._connected
     
-    def get_idle_time(self) -> float:
-        """
-        获取自上次发送音频以来的空闲时间（秒）
-        
-        Returns:
-        - 空闲时间（秒）
-        """
-        if self._last_audio_time == 0.0:
-            return 0.0
-        return asyncio.get_event_loop().time() - self._last_audio_time
-
     async def close(self) -> None:
         """
         Close the connection to ElevenLabs and clean up resources.
@@ -489,11 +372,9 @@ class ElevenLabsRealtimeClient:
         if self._ws is not None:
             try:
                 await self._ws.close()
-                print("[ElevenLabsRealtimeClient] WebSocket closed")
-            except Exception as exc:
-                print(f"[ElevenLabsRealtimeClient] Error while closing: {exc}")
+            except Exception:
+                pass
             finally:
                 self._ws = None
                 
         self._connected = False
-        print("[ElevenLabsRealtimeClient] Client disconnected")

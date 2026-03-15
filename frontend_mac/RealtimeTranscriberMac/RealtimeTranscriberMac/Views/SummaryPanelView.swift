@@ -83,7 +83,7 @@ struct SummaryPanelView: View {
     
     private var summaryListView: some View {
         ScrollView {
-            LazyVStack(spacing: 12) {
+            LazyVStack(spacing: 16) {
                 ForEach(Array(viewModel.summaries.enumerated()), id: \.element.id) { index, summary in
                     SummaryCardView(summary: summary)
                         .transition(.asymmetric(
@@ -93,7 +93,7 @@ struct SummaryPanelView: View {
                         .animation(.spring(response: 0.4, dampingFraction: 0.7), value: viewModel.summaries.count)
                 }
             }
-            .padding()
+            .padding(20)
         }
     }
 }

@@ -3,13 +3,13 @@ FAISS 索引管理器
 管理向量索引的创建、存储、加载和搜索
 """
 
-import os
 import faiss
 import numpy as np
 import pickle
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
+from typing import List, Optional, Dict
 from dataclasses import dataclass
+from config import EmbeddingConfig
 
 
 @dataclass
@@ -23,7 +23,7 @@ class SearchResult:
 class FAISSIndexManager:
     """FAISS 索引管理器"""
     
-    def __init__(self, dimension: int = 384, index_dir: Optional[Path] = None):
+    def __init__(self, dimension: int = EmbeddingConfig.DIMENSION, index_dir: Optional[Path] = None):
         """
         初始化 FAISS 索引管理器
         
@@ -47,9 +47,6 @@ class FAISSIndexManager:
         # ID 映射字典 {project_id: {faiss_id: summary_id}}
         self.id_mappings: Dict[int, Dict[int, int]] = {}
         
-        print(f"🗂️  FAISS Index Manager initialized")
-        print(f"   Dimension: {dimension}")
-        print(f"   Index directory: {self.index_dir}")
     
     def _get_index_path(self, project_id: int) -> Path:
         """获取项目的索引文件路径"""
@@ -75,7 +72,6 @@ class FAISSIndexManager:
         self.indices[project_id] = index
         self.id_mappings[project_id] = {}
         
-        print(f"✅ Created new FAISS index for project {project_id}")
         return index
     
     def load_index(self, project_id: int) -> Optional[faiss.Index]:
@@ -92,7 +88,6 @@ class FAISSIndexManager:
         mapping_path = self._get_mapping_path(project_id)
         
         if not index_path.exists():
-            print(f"ℹ️  No existing index found for project {project_id}")
             return None
         
         try:
@@ -107,14 +102,10 @@ class FAISSIndexManager:
             else:
                 self.id_mappings[project_id] = {}
             
-            print(f"✅ Loaded index for project {project_id}")
-            print(f"   Vectors: {index.ntotal}")
-            print(f"   Mappings: {len(self.id_mappings[project_id])}")
             
             return index
             
-        except Exception as e:
-            print(f"❌ Failed to load index for project {project_id}: {e}")
+        except Exception:
             return None
     
     def save_index(self, project_id: int) -> bool:
@@ -128,7 +119,6 @@ class FAISSIndexManager:
             bool: 是否保存成功
         """
         if project_id not in self.indices:
-            print(f"⚠️  No index found for project {project_id}")
             return False
         
         try:
@@ -142,14 +132,10 @@ class FAISSIndexManager:
             with open(mapping_path, 'wb') as f:
                 pickle.dump(self.id_mappings[project_id], f)
             
-            print(f"✅ Saved index for project {project_id}")
-            print(f"   Path: {index_path}")
-            print(f"   Vectors: {self.indices[project_id].ntotal}")
             
             return True
             
-        except Exception as e:
-            print(f"❌ Failed to save index for project {project_id}: {e}")
+        except Exception:
             return False
     
     def add_vectors(
@@ -192,8 +178,6 @@ class FAISSIndexManager:
             faiss_id = start_id + i
             mapping[faiss_id] = summary_id
         
-        print(f"✅ Added {len(summary_ids)} vectors to project {project_id}")
-        print(f"   Total vectors: {index.ntotal}")
         
         return True
     
@@ -218,13 +202,11 @@ class FAISSIndexManager:
         if project_id not in self.indices:
             index = self.load_index(project_id)
             if index is None:
-                print(f"⚠️  No index for project {project_id}")
                 return []
         
         index = self.indices[project_id]
         
         if index.ntotal == 0:
-            print(f"⚠️  Empty index for project {project_id}")
             return []
         
         # 归一化查询向量
@@ -238,7 +220,7 @@ class FAISSIndexManager:
         results = []
         mapping = self.id_mappings[project_id]
         
-        for i, (distance, faiss_id) in enumerate(zip(distances[0], indices[0])):
+        for distance, faiss_id in zip(distances[0], indices[0]):
             if faiss_id == -1:  # FAISS 返回 -1 表示无效结果
                 continue
             
@@ -255,8 +237,6 @@ class FAISSIndexManager:
                 similarity=similarity
             ))
         
-        print(f"🔍 Search in project {project_id}")
-        print(f"   Found {len(results)} results")
         
         return results
     
@@ -276,6 +256,6 @@ def get_faiss_manager() -> FAISSIndexManager:
     global _faiss_manager
     
     if _faiss_manager is None:
-        _faiss_manager = FAISSIndexManager(dimension=384)
+        _faiss_manager = FAISSIndexManager(dimension=EmbeddingConfig.DIMENSION)
     
     return _faiss_manager

@@ -10,7 +10,8 @@ import Foundation
 final class TranscriptionClient: NSObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession?
-    private var serverURL: URL
+    private var currentProjectId: String = "" // 项目Id
+    private let fixedServerURL: URL?
     private var isConnected: Bool = false          // 当前 WS 是否已经完成握手并且打开
     private var shouldReconnect: Bool = false      // 是否需要自动重连
     private var currentMode: String = ""           // 保存当前模式 (lecture/discussion)
@@ -20,42 +21,48 @@ final class TranscriptionClient: NSObject {
     /// 文本消息回调（服务端推来的字幕 / 提示）
     var onMessage: ((String) -> Void)?
     
-    init(serverURL: URL = URL(string: "ws://127.0.0.1:8000/ws/transcribe")!) {
-        self.serverURL = serverURL
+    private var serverURL: URL {
+        fixedServerURL ?? AppConfig.websocketURL
+    }
+
+    init(serverURL: URL? = nil) {
+        self.fixedServerURL = serverURL
         super.init()
-        
+    }
+    
+    /// 按需创建 URLSession，避免在 init 时就建立强引用循环
+    private func ensureSession() -> URLSession {
+        if let session = urlSession {
+            return session
+        }
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 60.0
         configuration.timeoutIntervalForResource = 300.0
         
-        self.urlSession = URLSession(
+        let session = URLSession(
             configuration: configuration,
             delegate: self,
             delegateQueue: OperationQueue()
         )
+        self.urlSession = session
+        return session
     }
     
     /// 建立 WebSocket 连接
     func connect() {
         guard !isConnected else {
-            print("[TranscriptionClient] Already connected")
             return
         }
         
         shouldReconnect = true
         reconnectAttempts = 0
         
-        print("[TranscriptionClient] Connecting to \(serverURL.absoluteString)")
         
-        guard let session = urlSession else {
-            print("[TranscriptionClient] ❌ URLSession not initialized")
-            return
-        }
+        let session = ensureSession()
         
         webSocketTask = session.webSocketTask(with: serverURL)
         webSocketTask?.resume()
         
-        print("[TranscriptionClient] WebSocket: connect() called, task resumed")
         // 注意：此时握手还没完成，isConnected 仍然是 false
         startReceiving()  // 等待 didOpenWithProtocol 回调来设置 isConnected = true
     }
@@ -63,19 +70,16 @@ final class TranscriptionClient: NSObject {
     /// 自动重连逻辑（带指数退避）
     private func reconnect() {
         guard shouldReconnect else {
-            print("[TranscriptionClient] Reconnect skipped (shouldReconnect = false)")
             return
         }
         
         guard reconnectAttempts < maxReconnectAttempts else {
-            print("[TranscriptionClient] ❌ Max reconnect attempts reached (\(maxReconnectAttempts))")
             return
         }
         
         reconnectAttempts += 1
         let delay = min(Double(reconnectAttempts) * 2.0, 10.0)  // 指数退避，最多 10 秒
         
-        print("[TranscriptionClient] 🔄 Reconnecting in \(delay)s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))...")
         
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self else { return }
@@ -91,7 +95,6 @@ final class TranscriptionClient: NSObject {
             self.webSocketTask = session.webSocketTask(with: self.serverURL)
             self.webSocketTask?.resume()
             
-            print("[TranscriptionClient] ✅ Reconnected to WebSocket (handshake pending)")
             
             // 重新开始接收消息
             self.startReceiving()
@@ -100,22 +103,35 @@ final class TranscriptionClient: NSObject {
             // 只在 didOpenWithProtocol 里设，代表握手真正成功。
             
             // 重新发送模式配置（如果已经有）
+            if !self.currentProjectId.isEmpty {
+                self.send(text: "PROJECT_ID:\(self.currentProjectId)")
+            }
+
             if !self.currentMode.isEmpty {
-                print("[TranscriptionClient] Resending mode after reconnect: \(self.currentMode)")
                 self.send(text: "MODE:\(self.currentMode)")
             }
         }
     }
     
-    /// 主动断开连接
+    /// 主动断开连接，同时 invalidate URLSession 打破引用循环
     func disconnect() {
         shouldReconnect = false
         isConnected = false
         
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
+        currentProjectId = ""
         
-        print("[TranscriptionClient] Disconnected")
+        // Invalidate session to break the delegate retain cycle
+        // ensureSession() will recreate it on next connect()
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
+    }
+    
+    deinit {
+        // Safety net: if disconnect() wasn't called
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        urlSession?.invalidateAndCancel()
     }
     
     /// 发送文本消息（比如 MODE:lecture / STOP 等）
@@ -123,7 +139,6 @@ final class TranscriptionClient: NSObject {
         // ✅ 只要任务存在就允许尝试发送，不强依赖 isConnected，
         // 因为 URLSession 会在握手 OK 后真正发出去；握手失败则在回调里出错。
         guard let task = webSocketTask else {
-            print("[TranscriptionClient] ❌ Cannot send text, webSocketTask is nil")
             return
         }
         
@@ -131,19 +146,21 @@ final class TranscriptionClient: NSObject {
         if text.uppercased().hasPrefix("MODE:") {
             currentMode = text.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)
         }
+        // 保存项目 ID（用于断线重连后恢复）
+        if text.uppercased().hasPrefix("PROJECT_ID:") {
+            currentProjectId = text.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)
+        }
         
         let message = URLSessionWebSocketTask.Message.string(text)
         task.send(message) { [weak self] error in
             guard let self = self else { return }
             
             if let error = error {
-                print("[TranscriptionClient] ❌ Failed to send text: \(error.localizedDescription)")
                 self.isConnected = false
                 if self.shouldReconnect {
                     self.reconnect()
                 }
             } else {
-                print("[TranscriptionClient] Text sent: \(text)")
             }
         }
     }
@@ -151,7 +168,6 @@ final class TranscriptionClient: NSObject {
     /// 发送音频二进制数据
     func sendAudio(_ data: Data) {
         guard let task = webSocketTask else {
-            print("[TranscriptionClient] ❌ Cannot send audio, webSocketTask is nil")
             return
         }
         
@@ -160,7 +176,6 @@ final class TranscriptionClient: NSObject {
             guard let self = self else { return }
             
             if let error = error {
-                print("[TranscriptionClient] ❌ Failed to send audio chunk: \(error.localizedDescription)")
                 self.isConnected = false
                 if self.shouldReconnect {
                     self.reconnect()
@@ -173,7 +188,6 @@ final class TranscriptionClient: NSObject {
     private func startReceiving() {
         // 如果当前没有 task，就不再递归
         guard let task = webSocketTask else {
-            print("[TranscriptionClient] ⚠️ startReceiving called but webSocketTask is nil")
             return
         }
         
@@ -184,23 +198,20 @@ final class TranscriptionClient: NSObject {
             case .success(let message):
                 switch message {
                 case .string(let text):
-                    print("[TranscriptionClient] WebSocket received string: \(text)")
                     DispatchQueue.main.async {
                         self.onMessage?(text)
                     }
                     
-                case .data(let data):
-                    print("[TranscriptionClient] WebSocket received data: \(data.count) bytes")
-                    
+                case .data(_):
+                    break
                 @unknown default:
-                    print("[TranscriptionClient] ⚠️ Unknown message type")
+                    break
                 }
                 
                 // ✅ 无论 isConnected 与否，只要 task 还在，就继续接收下一条。
                 self.startReceiving()
                 
             case .failure(let error):
-                print("[TranscriptionClient] ❌ WebSocket receive error: \(error.localizedDescription)")
                 self.isConnected = false
                 
                 if self.shouldReconnect {
@@ -219,7 +230,6 @@ extension TranscriptionClient: URLSessionWebSocketDelegate {
         webSocketTask: URLSessionWebSocketTask,
         didOpenWithProtocol `protocol`: String?
     ) {
-        print("[TranscriptionClient] ✅ WebSocket connection opened")
         isConnected = true
         reconnectAttempts = 0
     }
@@ -230,7 +240,6 @@ extension TranscriptionClient: URLSessionWebSocketDelegate {
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
-        print("[TranscriptionClient] ⚠️ WebSocket closed with code: \(closeCode.rawValue)")
         isConnected = false
         
         if shouldReconnect {
@@ -244,14 +253,12 @@ extension TranscriptionClient: URLSessionWebSocketDelegate {
         didCompleteWithError error: Error?
     ) {
         if let error = error {
-            print("[TranscriptionClient] ❌ WebSocket task completed with error: \(error.localizedDescription)")
             isConnected = false
             
             if shouldReconnect {
                 reconnect()
             }
         } else {
-            print("[TranscriptionClient] WebSocket task completed normally")
         }
     }
 }

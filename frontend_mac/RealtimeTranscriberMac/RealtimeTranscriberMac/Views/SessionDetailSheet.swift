@@ -53,10 +53,8 @@ struct SessionDetailSheet: View {
         .frame(width: 700, height: 600)
         .alert("Delete Session", isPresented: $showDeleteSessionConfirmation) {
                 Button("Cancel", role: .cancel) {
-                    print("❌ Delete session cancelled")
                 }
                 Button("Delete", role: .destructive) {
-                    print("🗑️ Delete session confirmed in alert")
                     deleteSessionConfirmed()
                 }
             } message: {
@@ -65,10 +63,8 @@ struct SessionDetailSheet: View {
             .alert("Delete Summary", isPresented: $showDeleteSummaryConfirmation) {
                 Button("Cancel", role: .cancel) {
                     summaryToDelete = nil
-                    print("❌ Delete summary cancelled")
                 }
                 Button("Delete", role: .destructive) {
-                    print("🗑️ Delete summary confirmed in alert")
                     deleteSummaryConfirmed()
                 }
             } message: {
@@ -173,7 +169,7 @@ struct SessionDetailSheet: View {
             .padding(.horizontal, 12)
             .background(
                 selectedTab == tab
-                    ? Color.accentColor.opacity(0.15)
+                ? Color.indigo.opacity(0.12)
                     : Color.clear
             )
             .cornerRadius(6)
@@ -310,7 +306,6 @@ struct SessionDetailSheet: View {
     
     private func exportTranscript() {
         guard let transcript = session.transcriptText, !transcript.isEmpty else {
-            print("⚠️ No transcript to export")
             return
         }
         
@@ -321,16 +316,13 @@ struct SessionDetailSheet: View {
         if panel.runModal() == .OK, let url = panel.url {
             do {
                 try transcript.write(to: url, atomically: true, encoding: .utf8)
-                print("✅ Transcript exported to: \(url.path)")
             } catch {
-                print("❌ Export failed: \(error)")
             }
         }
     }
     
     private func exportAllSummaries() {
         guard !localSummaries.isEmpty else {
-            print("⚠️ No summaries to export")
             return
         }
         
@@ -352,9 +344,7 @@ struct SessionDetailSheet: View {
         if panel.runModal() == .OK, let url = panel.url {
             do {
                 try content.write(to: url, atomically: true, encoding: .utf8)
-                print("✅ Summaries exported to: \(url.path)")
             } catch {
-                print("❌ Export failed: \(error)")
             }
         }
     }
@@ -363,42 +353,34 @@ struct SessionDetailSheet: View {
 
     private func deleteSummaryConfirmed() {
         guard let summary = summaryToDelete else {
-            print("⚠️ No summary to delete")
             return
         }
         
-        print("🗑️ Deleting summary \(summary.id) from local list")
         
         // 从本地列表移除
         withAnimation {
             localSummaries.removeAll { $0.id == summary.id }
         }
         
-        print("✅ Summary removed from local list, count: \(localSummaries.count)")
         
         // 调用外部回调
         if let callback = onDeleteSummary {
-            print("📞 Calling onDeleteSummary callback")
             callback(summary.id)
         } else {
-            print("⚠️ No onDeleteSummary callback provided")
         }
         
         summaryToDelete = nil
     }
 
     private func deleteSessionConfirmed() {
-        print("🗑️ Deleting session \(session.id)")
         
         // 关闭浮窗
         isPresented = false
         
         // 调用外部回调
         if let callback = onDeleteSession {
-            print("📞 Calling onDeleteSession callback")
             callback()
         } else {
-            print("⚠️ No onDeleteSession callback provided")
         }
     }
 }
@@ -440,8 +422,6 @@ struct SessionSummaryCardView: View {
                 // 🔧 新增：删除按钮（hover 时显示）
                 if isHovering {
                     Button(action: {
-                        print("🔴 Delete Summary button clicked!")
-                        print("   Summary ID: \(summary.id)")
                         onDelete()
                     }) {
                         Image(systemName: "trash")
@@ -454,7 +434,6 @@ struct SessionSummaryCardView: View {
                 
                 // Expand/Collapse button
                 Button(action: {
-                    print("📋 Toggle expand for summary \(summary.id)")
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isExpanded.toggle()
                     }
@@ -490,10 +469,10 @@ struct SessionSummaryCardView: View {
             }
         }
         .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(8)
+        .cornerRadius(12)
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.gray.opacity(0.15), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
         .onHover { hovering in
@@ -520,45 +499,5 @@ struct SessionSummaryCardView: View {
         }
         
         return bullets
-    }
-}
-
-// MARK: - Alert Extensions
-
-extension SessionDetailSheet {
-    var deleteSessionAlert: some View {
-        EmptyView()
-            .alert("Delete Session", isPresented: $showDeleteSessionConfirmation) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
-                    deleteSessionConfirmed()
-                }
-            } message: {
-                Text("Are you sure you want to delete this entire session? This will delete the transcript and all \(localSummaries.count) summaries. This cannot be undone.")
-            }
-    }
-    
-    var deleteSummaryAlert: some View {
-        EmptyView()
-            .alert("Delete Summary", isPresented: $showDeleteSummaryConfirmation) {
-                Button("Cancel", role: .cancel) {
-                    summaryToDelete = nil
-                }
-                Button("Delete", role: .destructive) {
-                    deleteSummaryConfirmed()
-                }
-            } message: {
-                Text("Are you sure you want to delete this summary? This cannot be undone.")
-            }
-    }
-}
-
-// MARK: - Update body to include alerts
-
-extension SessionDetailSheet {
-    var bodyWithAlerts: some View {
-        body
-            .background(deleteSessionAlert)
-            .background(deleteSummaryAlert)
     }
 }

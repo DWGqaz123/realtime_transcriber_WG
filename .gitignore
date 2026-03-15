@@ -116,6 +116,9 @@ build/
 # Disk images / installers
 ####################################
 *.dmg
+*.app
+dmg_temp_*/
+RealtimeTranscriberMac */
 
 ####################################
 # OS / misc
@@ -126,3 +129,7 @@ config.plist
 
 # Prevent accidental backend copies in frontend
 frontend_mac/**/backend*
+
+dist/
+database/
+build/

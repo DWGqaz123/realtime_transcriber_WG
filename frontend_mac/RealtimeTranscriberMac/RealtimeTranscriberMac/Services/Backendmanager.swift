@@ -15,6 +15,11 @@ class BackendManager: ObservableObject {
     private var process: Process?
     private var outputPipe: Pipe?
     private var errorPipe: Pipe?
+    private var healthCheckAttempts = 0
+    private let maxHealthCheckAttempts = 10
+
+    private var backendHost: String { AppConfig.backendHost }
+    private var backendPort: Int { AppConfig.backendPort }
     
     init() {
         // 延迟启动，等 App 完全初始化
@@ -28,11 +33,9 @@ class BackendManager: ObservableObject {
         guard let backendPath = Bundle.main.path(forResource: "backend", ofType: nil) else {
             let message = "❌ Backend executable not found in bundle"
             error = message
-            print(message)
             return
         }
         
-        print("🔍 Found backend at: \(backendPath)")
         
         // 检查文件是否存在
         let fileManager = FileManager.default
@@ -47,12 +50,10 @@ class BackendManager: ObservableObject {
             let permissions = attributes[.posixPermissions] as? Int ?? 0
             
             if permissions & 0o111 == 0 {
-                print("⚠️ Backend not executable, setting permissions...")
                 try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: backendPath)
             }
         } catch {
             self.error = "Failed to set permissions: \(error.localizedDescription)"
-            print("❌ Permission error: \(error)")
             return
         }
         
@@ -70,20 +71,23 @@ class BackendManager: ObservableObject {
         var environment = ProcessInfo.processInfo.environment
         environment["PYTHONUNBUFFERED"] = "1"
         environment["PYTHONIOENCODING"] = "utf-8"
+        environment["HOST"] = backendHost
+        environment["PORT"] = String(backendPort)
         
         // 🔑 从 UserDefaults 读取 API Keys
         if let openaiKey = UserDefaults.standard.string(forKey: "openai_api_key"), !openaiKey.isEmpty {
             environment["OPENAI_API_KEY"] = openaiKey
-            print("🔑 OpenAI API key loaded from settings")
         } else {
-            print("⚠️ OpenAI API key not configured")
         }
         
         if let elevenlabsKey = UserDefaults.standard.string(forKey: "elevenlabs_api_key"), !elevenlabsKey.isEmpty {
             environment["ELEVENLABS_API_KEY"] = elevenlabsKey
-            print("🔑 ElevenLabs API key loaded from settings")
         } else {
-            print("⚠️ ElevenLabs API key not configured")
+        }
+
+        let summaryInterval = UserDefaults.standard.integer(forKey: "summary_interval_seconds")
+        if summaryInterval > 0 {
+            environment["SUMMARY_INTERVAL_SECONDS"] = String(summaryInterval)
         }
         
         process?.environment = environment
@@ -100,7 +104,6 @@ class BackendManager: ObservableObject {
         outputPipe?.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if let output = String(data: data, encoding: .utf8), !output.isEmpty {
-                print("📤 Backend stdout: \(output)")
                 self?.checkForStartupMessage(output)
             }
         }
@@ -109,7 +112,6 @@ class BackendManager: ObservableObject {
         errorPipe?.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if let output = String(data: data, encoding: .utf8), !output.isEmpty {
-                print("📤 Backend stderr: \(output)")
                 self?.checkForStartupMessage(output)
             }
         }
@@ -117,16 +119,14 @@ class BackendManager: ObservableObject {
         // 启动进程
         do {
             try process?.run()
-            print("✅ Backend process started (PID: \(process?.processIdentifier ?? -1))")
             
             // 等待后端启动
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
                 self.checkServerHealth()
             }
         } catch {
             let message = "Failed to start backend: \(error.localizedDescription)"
             self.error = message
-            print("❌ \(message)")
         }
         
     }
@@ -136,25 +136,44 @@ class BackendManager: ObservableObject {
         if output.contains("Uvicorn running on") || output.contains("Application startup complete") {
             DispatchQueue.main.async {
                 self.isRunning = true
-                print("✅ Backend confirmed running")
             }
         }
     }
     
     func checkServerHealth() {
-        guard let url = URL(string: "http://127.0.0.1:8000/health") else { return }
+        guard healthCheckAttempts < maxHealthCheckAttempts else {
+            DispatchQueue.main.async {
+                self.error = "Backend failed to start after \(self.maxHealthCheckAttempts) attempts"
+            }
+            return
+        }
+        
+        healthCheckAttempts += 1
+        let url = AppConfig.healthURL
+        
         
         var request = URLRequest(url: url)
-        request.timeoutInterval = 5
+        request.timeoutInterval = 10  // ← 增加超时时间到 10 秒
         
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    self?.isRunning = true
-                    print("✅ Backend health check passed")
+            if error != nil {
+                
+                // 不要立即放弃，多重试几次
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    self?.checkServerHealth()
+                }
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                
+                if httpResponse.statusCode == 200 {
+                    DispatchQueue.main.async {
+                        self?.isRunning = true
+                        self?.error = nil
+                        self?.healthCheckAttempts = 0
+                    }
                 } else {
-                    print("⚠️ Backend health check failed: \(error?.localizedDescription ?? "Unknown error")")
-                    // 再等待一会儿重试
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                         self?.checkServerHealth()
                     }
@@ -164,22 +183,32 @@ class BackendManager: ObservableObject {
     }
     
     func stopBackend() {
-        print("🛑 Stopping backend...")
-        process?.terminate()
+        // Clear pipe handlers before stopping to prevent retain cycles
+        outputPipe?.fileHandleForReading.readabilityHandler = nil
+        errorPipe?.fileHandleForReading.readabilityHandler = nil
         
-        // 等待进程结束
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-            if self.process?.isRunning == true {
-                self.process?.interrupt()
+        if let proc = process, proc.isRunning {
+            proc.terminate()
+            
+            // Give the process a moment then force-kill if still alive
+            let procRef = proc
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                if procRef.isRunning {
+                    procRef.interrupt()
+                }
             }
         }
         
         process = nil
+        outputPipe = nil
+        errorPipe = nil
         isRunning = false
-        print("✅ Backend stopped")
     }
     
     deinit {
-        stopBackend()
+        // Inline cleanup to avoid using self in async context during deallocation
+        outputPipe?.fileHandleForReading.readabilityHandler = nil
+        errorPipe?.fileHandleForReading.readabilityHandler = nil
+        process?.terminate()
     }
 }

@@ -1,64 +1,74 @@
 """
 向量化服务
-使用 Sentence Transformers 进行本地向量化
+使用 Hugging Face Inference API 进行远程向量化
 """
 
-import os
 from typing import List, Optional
-from sentence_transformers import SentenceTransformer
+import httpx
 import numpy as np
-import time
+
+from config import EmbeddingConfig
 
 
 class EmbeddingService:
-    """向量化服务（使用 Sentence Transformers）"""
-    
-    def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"):
-        """
-        初始化向量化服务
-        
-        Args:
-            model_name: Sentence Transformers 模型名称
-        """
-        self.model_name = model_name
-        self.model = None
-        self.dimension = 384  # MiniLM 默认维度
-        
-        print(f"🤖 Initializing EmbeddingService")
-        print(f"   Model: {model_name}")
-        
-        # 延迟加载模型（首次使用时加载）
-        self._load_model()
-    
-    def _load_model(self):
-        """加载 Sentence Transformers 模型"""
-        if self.model is not None:
-            return
-        
-        print(f"📦 Loading Sentence Transformers model: {self.model_name}")
-        start_time = time.time()
-        
-        try:
-            # 设置缓存目录
-            cache_dir = os.path.join(os.path.dirname(__file__), "models")
-            os.makedirs(cache_dir, exist_ok=True)
-            
-            # 加载模型
-            self.model = SentenceTransformer(
-                self.model_name,
-                cache_folder=cache_dir
-            )
-            
-            # 获取实际维度
-            self.dimension = self.model.get_sentence_embedding_dimension()
-            
-            elapsed = time.time() - start_time
-            print(f"✅ Model loaded successfully in {elapsed:.2f}s")
-            print(f"   Dimension: {self.dimension}")
-            
-        except Exception as e:
-            print(f"❌ Failed to load model: {e}")
-            raise
+    """向量化服务（使用 Hugging Face Inference API）"""
+
+    def __init__(self, model_name: Optional[str] = None):
+        self.model_name = model_name or EmbeddingConfig.MODEL
+        self.dimension = EmbeddingConfig.DIMENSION
+        self.api_timeout = EmbeddingConfig.TIMEOUT_SECONDS
+        self.batch_size = EmbeddingConfig.BATCH_SIZE
+        self.api_url = EmbeddingConfig.get_api_url(self.model_name)
+        self.api_key = EmbeddingConfig.get_api_key()
+
+    def _headers(self) -> dict:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _extract_vector(self, raw: object) -> np.ndarray:
+        """把 Hugging Face 响应结构统一转换为 1D 向量。"""
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("Invalid embedding response format")
+
+        # 1D: [d]
+        if isinstance(raw[0], (float, int)):
+            vec = np.array(raw, dtype=np.float32)
+            return vec
+
+        # 2D token-level: [tokens, d] -> mean pooling
+        if isinstance(raw[0], list) and raw[0] and isinstance(raw[0][0], (float, int)):
+            token_matrix = np.array(raw, dtype=np.float32)
+            return token_matrix.mean(axis=0)
+
+        raise ValueError("Unsupported embedding shape from API")
+
+    def _request_embeddings(self, inputs: List[str]) -> List[np.ndarray]:
+        payload = {
+            "inputs": inputs,
+            "options": {"wait_for_model": True}
+        }
+
+        with httpx.Client(timeout=self.api_timeout) as client:
+            response = client.post(self.api_url, headers=self._headers(), json=payload)
+
+        if response.status_code != 200:
+            raise RuntimeError(f"Embedding API failed: {response.status_code} {response.text[:200]}")
+
+        data = response.json()
+        if not isinstance(data, list):
+            raise ValueError("Invalid embedding API response")
+
+        # 单条输入时，可能返回 [d] 或 [tokens, d]
+        if len(inputs) == 1:
+            return [self._extract_vector(data)]
+
+        # 批量输入时，期望 [N, ...]
+        vectors: List[np.ndarray] = []
+        for item in data:
+            vectors.append(self._extract_vector(item))
+        return vectors
     
     def embed_text(self, text: str) -> np.ndarray:
         """
@@ -73,19 +83,15 @@ class EmbeddingService:
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
         
-        # 确保模型已加载
-        self._load_model()
-        
-        # 向量化
-        embedding = self.model.encode(
-            text,
-            convert_to_numpy=True,
-            show_progress_bar=False
-        )
-        
-        return embedding
+        vectors = self._request_embeddings([text])
+        vector = vectors[0]
+        if vector.shape[0] != self.dimension:
+            raise ValueError(
+                f"Embedding dimension mismatch: expected {self.dimension}, got {vector.shape[0]}"
+            )
+        return vector
     
-    def embed_batch(self, texts: List[str], batch_size: int = 32) -> np.ndarray:
+    def embed_batch(self, texts: List[str], batch_size: Optional[int] = None) -> np.ndarray:
         """
         批量向量化
         
@@ -103,25 +109,19 @@ class EmbeddingService:
         valid_texts = [t for t in texts if t and t.strip()]
         if not valid_texts:
             raise ValueError("No valid texts to embed")
-        
-        # 确保模型已加载
-        self._load_model()
-        
-        print(f"🔄 Embedding {len(valid_texts)} texts...")
-        start_time = time.time()
-        
-        # 批量向量化
-        embeddings = self.model.encode(
-            valid_texts,
-            batch_size=batch_size,
-            convert_to_numpy=True,
-            show_progress_bar=True
-        )
-        
-        elapsed = time.time() - start_time
-        print(f"✅ Embedded {len(valid_texts)} texts in {elapsed:.2f}s")
-        print(f"   Speed: {len(valid_texts) / elapsed:.1f} texts/sec")
-        
+
+        effective_batch = batch_size or self.batch_size
+        all_vectors: List[np.ndarray] = []
+
+        for i in range(0, len(valid_texts), effective_batch):
+            chunk = valid_texts[i:i + effective_batch]
+            all_vectors.extend(self._request_embeddings(chunk))
+
+        embeddings = np.vstack(all_vectors).astype(np.float32)
+        if embeddings.shape[1] != self.dimension:
+            raise ValueError(
+                f"Embedding dimension mismatch: expected {self.dimension}, got {embeddings.shape[1]}"
+            )
         return embeddings
     
     def get_dimension(self) -> int:

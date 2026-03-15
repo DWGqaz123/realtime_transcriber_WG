@@ -1,0 +1,59 @@
+╔════════════════════════════════════════════════════════╗
+║      🔍 Realtime Transcriber 诊断工具                  ║
+╚════════════════════════════════════════════════════════╝
+
+📦 Step 1: 检查 App 安装
+✅ App 已安装: /Applications/RealtimeTranscriberMac.app
+
+🔍 Step 2: 检查后端文件
+✅ Backend 文件存在
+   文件大小: 601M
+   权限: -rwxr-xr-x
+   ✅ 可执行权限正常
+
+🔒 Step 3: 检查安全属性
+✅ 无隔离属性
+
+🏃 Step 4: 检查后端进程
+✅ Backend 进程运行中:
+dwg               8706   0.1  3.3 415202928 558576   ??  S    10:12上午   0:06.64 /Applications/RealtimeTranscriberMac.app/Contents/Resources/backend
+dwg               8695   0.0  0.0 411380944    480   ??  S    10:12上午   0:04.65 /Applications/RealtimeTranscriberMac.app/Contents/Resources/backend
+
+🔌 Step 5: 检查端口监听
+✅ 端口 8000 正在监听:
+COMMAND  PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+backend 8706  dwg   17u  IPv4 0xcaeeb7458916c313      0t0  TCP *:irdmi (LISTEN)
+
+📝 Step 6: 检查日志文件
+⚠️  日志文件不存在
+
+🧪 Step 7: 手动测试后端启动
+尝试手动运行后端（5秒超时）...
+./diagnose_app.sh: line 100: timeout: command not found
+
+💾 Step 8: 检查数据目录
+✅ 数据目录存在: /Users/dwg/Library/Application Support/RealtimeTranscriber
+   内容:
+total 280
+drwxr-xr-x@   9 dwg  staff     288  1 15 09:56 .
+drwx------+ 160 dwg  staff    5120  1 12 12:48 ..
+-rw-r--r--    1 dwg  staff     260  1 13 23:02 api_keys.json
+-rw-r--r--    1 dwg  staff    7686  1 15 10:13 backend.log
+drwxr-xr-x    2 dwg  staff      64  1 12 13:06 database
+drwxr-xr-x@  10 dwg  staff     320  1 13 22:51 faiss_indices
+drwxr-xr-x    2 dwg  staff      64  1 12 13:06 runs
+drwxr-xr-x    7 dwg  staff     224  1 13 22:51 transcripts
+-rw-r--r--@   1 dwg  staff  102400  1 15 09:56 transcripts.db
+
+📚 Step 9: 检查后端依赖
+动态库依赖:
+/Applications/RealtimeTranscriberMac.app/Contents/Resources/backend:
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)
+	/usr/lib/libz.1.dylib (compatibility version 1.0.0, current version 1.2.12)
+
+╔════════════════════════════════════════════════════════╗
+║                   📋 诊断总结                          ║
+╚════════════════════════════════════════════════════════╝
+
+请将以上输出发送给开发者进行分析
+

@@ -1,31 +1,12 @@
 # backend/database/db.py
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session as DBSession, joinedload
-from database.models import Base, Project, Session
+from sqlalchemy import create_engine, func
+from sqlalchemy.orm import sessionmaker, Session as DBSession
+from database.models import Base, Project, Session, Summary
 from typing import Optional, List
 from datetime import datetime
-import os
 from pathlib import Path
-from database.models import Project, Session, Summary  
 
-# 数据库文件路径
-DB_PATH = os.path.expanduser("~/Library/Application Support/RealtimeTranscriber/transcripts.db")
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-
-# 创建数据库引擎
-engine = create_engine(
-    f"sqlite:///{DB_PATH}",
-    connect_args={"check_same_thread": False},
-    echo=False  # 生产环境关闭 SQL 日志
-)
-
-# 创建表
-Base.metadata.create_all(engine)
-
-# 会话工厂
-SessionLocal = sessionmaker(bind=engine)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class DatabaseManager:
     """数据库管理器"""
@@ -34,22 +15,101 @@ class DatabaseManager:
     _SessionLocal = None
     
     @staticmethod
+    def _table_has_column(connection, table_name: str, column_name: str) -> bool:
+        rows = connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
+        return any(row[1] == column_name for row in rows)
+
+    @staticmethod
+    def _migrate_remove_redundant_project_columns():
+        engine = DatabaseManager._engine
+        if engine is None:
+            return
+
+        with engine.begin() as connection:
+            needs_summary_migration = DatabaseManager._table_has_column(connection, "summaries", "project_id")
+            needs_embedding_migration = DatabaseManager._table_has_column(connection, "embeddings", "project_id")
+
+            if not needs_summary_migration and not needs_embedding_migration:
+                return
+
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+
+            if needs_summary_migration:
+                connection.exec_driver_sql("ALTER TABLE summaries RENAME TO summaries_old")
+                connection.exec_driver_sql(
+                    """
+                    CREATE TABLE summaries (
+                        id INTEGER PRIMARY KEY,
+                        session_id INTEGER NOT NULL,
+                        content TEXT NOT NULL,
+                        source_text TEXT,
+                        start_sentence_idx INTEGER,
+                        end_sentence_idx INTEGER,
+                        created_at DATETIME,
+                        duration_seconds INTEGER,
+                        is_indexed BOOLEAN,
+                        indexed_at DATETIME,
+                        FOREIGN KEY(session_id) REFERENCES sessions (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                connection.exec_driver_sql(
+                    """
+                    INSERT INTO summaries (
+                        id, session_id, content, source_text, start_sentence_idx,
+                        end_sentence_idx, created_at, duration_seconds, is_indexed, indexed_at
+                    )
+                    SELECT
+                        id, session_id, content, source_text, start_sentence_idx,
+                        end_sentence_idx, created_at, duration_seconds, is_indexed, indexed_at
+                    FROM summaries_old
+                    """
+                )
+                connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_summaries_id ON summaries (id)")
+                connection.exec_driver_sql("DROP TABLE summaries_old")
+
+            if needs_embedding_migration:
+                connection.exec_driver_sql("ALTER TABLE embeddings RENAME TO embeddings_old")
+                connection.exec_driver_sql(
+                    """
+                    CREATE TABLE embeddings (
+                        id INTEGER PRIMARY KEY,
+                        summary_id INTEGER NOT NULL UNIQUE,
+                        faiss_index_id INTEGER NOT NULL,
+                        content_preview TEXT,
+                        session_mode VARCHAR(50),
+                        indexed_at DATETIME,
+                        embedding_model VARCHAR(100),
+                        embedding_dimension INTEGER,
+                        FOREIGN KEY(summary_id) REFERENCES summaries (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                connection.exec_driver_sql(
+                    """
+                    INSERT INTO embeddings (
+                        id, summary_id, faiss_index_id, content_preview,
+                        session_mode, indexed_at, embedding_model, embedding_dimension
+                    )
+                    SELECT
+                        id, summary_id, faiss_index_id, content_preview,
+                        session_mode, indexed_at, embedding_model, embedding_dimension
+                    FROM embeddings_old
+                    """
+                )
+                connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_embeddings_id ON embeddings (id)")
+                connection.exec_driver_sql("DROP TABLE embeddings_old")
+
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+
     @staticmethod
     def get_db() -> DBSession:
-        """获取数据库会话"""
-        # 🔧 确保数据库已初始化
+        """获取数据库会话（裸返回，调用方负责关闭）"""
         if DatabaseManager._SessionLocal is None:
             DatabaseManager._init_db()
-        
-        db = DatabaseManager._SessionLocal()
-        try:
-            return db
-        except:
-            db.close()
-            raise
-        
-    @staticmethod
+        return DatabaseManager._SessionLocal()
 
+    @staticmethod
     def _init_db():
         """初始化数据库"""
         if DatabaseManager._engine is None:
@@ -70,11 +130,9 @@ class DatabaseManager:
                 bind=DatabaseManager._engine
             )
             
-            # 🔧 创建所有表
-            from database.models import Base
             Base.metadata.create_all(bind=DatabaseManager._engine)
+            DatabaseManager._migrate_remove_redundant_project_columns()
             
-            print(f"✅ Database initialized at: {db_path}")
     # ========== Project 操作 ==========
     
     @staticmethod
@@ -99,15 +157,22 @@ class DatabaseManager:
         """获取所有项目"""
         db = DatabaseManager.get_db()
         try:
-            # 🔧 使用 joinedload 预加载 sessions 关系
-            projects = db.query(Project).options(
-                joinedload(Project.sessions)
-            ).order_by(Project.updated_at.desc()).all()
-            
-            # 🔧 确保 sessions 已加载（触发懒加载）
-            for project in projects:
-                _ = len(project.sessions)
-            
+            rows = db.query(
+                Project,
+                func.count(Session.id).label("session_count")
+            ).outerjoin(
+                Session, Session.project_id == Project.id
+            ).group_by(
+                Project.id
+            ).order_by(
+                Project.updated_at.desc()
+            ).all()
+
+            projects = []
+            for project, session_count in rows:
+                project.session_count = session_count
+                projects.append(project)
+
             return projects
         finally:
             db.close()
@@ -117,13 +182,22 @@ class DatabaseManager:
         """根据 ID 获取项目"""
         db = DatabaseManager.get_db()
         try:
-            project = db.query(Project).options(
-                joinedload(Project.sessions)
-            ).filter(Project.id == project_id).first()
-            
-            if project:
-                _ = len(project.sessions)
-            
+            row = db.query(
+                Project,
+                func.count(Session.id).label("session_count")
+            ).outerjoin(
+                Session, Session.project_id == Project.id
+            ).filter(
+                Project.id == project_id
+            ).group_by(
+                Project.id
+            ).first()
+
+            if row is None:
+                return None
+
+            project, session_count = row
+            project.session_count = session_count
             return project
         finally:
             db.close()
@@ -223,7 +297,6 @@ class DatabaseManager:
     @staticmethod
     def create_summary(
         session_id: int,
-        project_id: int,
         content: str,
         source_text: str,
         start_sentence_idx: int,
@@ -238,7 +311,6 @@ class DatabaseManager:
             
             summary = Summary(
                 session_id=session_id,
-                project_id=project_id,
                 content=content,
                 source_text=source_text,
                 start_sentence_idx=start_sentence_idx,
@@ -250,15 +322,11 @@ class DatabaseManager:
             db.commit()
             db.refresh(summary)
             
-            print(f"✅ [DB] Created summary: id={summary.id}, session={session_id}")
             
             return summary
             
-        except Exception as e:
+        except Exception:
             db.rollback()
-            print(f"❌ [DB] Error creating summary: {e}")
-            import traceback
-            traceback.print_exc()
             raise
         finally:
             db.close()
@@ -288,8 +356,8 @@ class DatabaseManager:
         try:
             from database.models import Summary
             
-            summaries = db.query(Summary).filter(
-                Summary.project_id == project_id
+            summaries = db.query(Summary).join(Session).filter(
+                Session.project_id == project_id
             ).order_by(Summary.created_at.desc()).all()
             
             return summaries
@@ -310,38 +378,6 @@ class DatabaseManager:
 
 
     @staticmethod
-    def update_summary_embedding(
-        summary_id: int,
-        embedding_vector: str,
-        status: str = "completed"
-    ) -> bool:
-        """更新摘要的 embedding 信息（预留）"""
-        db = DatabaseManager.get_db()
-        try:
-            from database.models import Summary
-            
-            summary = db.query(Summary).filter(Summary.id == summary_id).first()
-            
-            if not summary:
-                return False
-            
-            summary.embedding_vector = embedding_vector
-            summary.embedding_status = status
-            
-            db.commit()
-            
-            print(f"✅ [DB] Updated embedding for summary {summary_id}")
-            
-            return True
-            
-        except Exception as e:
-            db.rollback()
-            print(f"❌ [DB] Error updating embedding: {e}")
-            raise
-        finally:
-            db.close()
-    
-    @staticmethod
     def delete_session(session_id: int) -> bool:
         """
         删除 session（级联删除 summaries）
@@ -355,26 +391,16 @@ class DatabaseManager:
             session = db.query(Session).filter(Session.id == session_id).first()
             
             if not session:
-                print(f"⚠️ [DB] Session {session_id} not found")
                 return False
-            
-            # 获取 summaries 数量（用于日志）
-            summaries_count = len(session.summaries) if hasattr(session, 'summaries') else 0
-            
-            # 删除 session（会级联删除 summaries）
+
             db.delete(session)
             db.commit()
             
-            print(f"✅ [DB] Deleted session {session_id}")
-            print(f"   Cascaded deletion of {summaries_count} summaries")
             
             return True
         
-        except Exception as e:
+        except Exception:
             db.rollback()
-            print(f"❌ [DB] Error deleting session: {e}")
-            import traceback
-            traceback.print_exc()
             raise
         finally:
             db.close()
@@ -390,37 +416,16 @@ class DatabaseManager:
             summary = db.query(Summary).filter(Summary.id == summary_id).first()
             
             if not summary:
-                print(f"⚠️ [DB] Summary {summary_id} not found")
                 return False
             
             db.delete(summary)
             db.commit()
             
-            print(f"✅ [DB] Deleted summary {summary_id}")
             
             return True
             
-        except Exception as e:
+        except Exception:
             db.rollback()
-            print(f"❌ [DB] Error deleting summary: {e}")
-            import traceback
-            traceback.print_exc()
             raise
-        finally:
-            db.close()
-    
-    @staticmethod
-    def get_pending_embeddings(limit: int = 100) -> List[Summary]:
-        """获取待向量化的摘要（预留）"""
-        db = DatabaseManager.get_db()
-        try:
-            from database.models import Summary
-            
-            summaries = db.query(Summary).filter(
-                Summary.embedding_status == "pending"
-            ).limit(limit).all()
-            
-            return summaries
-            
         finally:
             db.close()

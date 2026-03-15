@@ -32,7 +32,7 @@ struct ProjectSidebarView: View {
                         showSearchSheet = true
                     }) {
                         Image(systemName: "magnifyingglass")
-                            .foregroundColor(.blue)
+                            .foregroundColor(.indigo)
                             .font(.title3)
                     }
                     .buttonStyle(.plain)
@@ -85,7 +85,7 @@ struct ProjectSidebarView: View {
                                 onSelectSession: { session in
                                     viewModel.selectSession(projectId: project.id, session: session)
                                 },
-                                onDeleteSession: { session in  // 🔧 新增
+                                onDeleteSession: { session in
                                     sessionToDelete = (projectId: project.id, session: session)
                                     showDeleteSessionConfirmation = true
                                 },
@@ -124,9 +124,6 @@ struct ProjectSidebarView: View {
                     session: session,
                     isPresented: $viewModel.showSessionDetail,
                     onDeleteSession: {
-                        print("🔵 onDeleteSession callback in sheet")
-                        print("   Captured sessionId: \(sessionId)")
-                        print("   Captured projectId: \(String(describing: projectId))")
                         
                         if let pid = projectId {
                             Task {
@@ -136,14 +133,9 @@ struct ProjectSidebarView: View {
                                 )
                             }
                         } else {
-                            print("⚠️ No project ID captured")
                         }
                     },
                     onDeleteSummary: { summaryId in
-                        print("🔵 onDeleteSummary callback in sheet")
-                        print("   Captured sessionId: \(sessionId)")
-                        print("   Captured projectId: \(String(describing: projectId))")
-                        print("   SummaryId: \(summaryId)")
                         
                         if let pid = projectId {
                             Task {
@@ -154,14 +146,12 @@ struct ProjectSidebarView: View {
                                 )
                             }
                         } else {
-                            print("⚠️ No project ID captured")
                         }
                     }
                 )
             } else {
                 Text("No session selected")
                     .onAppear {
-                        print("⚠️ Sheet opened but no session selected")
                     }
             }
         }
@@ -170,7 +160,6 @@ struct ProjectSidebarView: View {
                 SearchView(
                     project: project,
                     onSelectSession: { sessionId in  // 🔧 新增回调
-                        print("🔍 User selected session from search: \(sessionId)")
                         
                         // 关闭搜索界面
                         showSearchSheet = false
@@ -270,7 +259,7 @@ struct ProjectSidebarView: View {
         HStack {
             if viewModel.isLoading {
                 ProgressView()
-                    .scaleEffect(0.7)
+                    .controlSize(.small)
             }
             
             Text("\(viewModel.projects.count) project\(viewModel.projects.count == 1 ? "" : "s")")
@@ -329,7 +318,7 @@ struct ProjectRowExpandable: View {
                 
                 // Icon
                 Image(systemName: isSelected ? "folder.fill" : "folder")
-                    .foregroundColor(isSelected ? .blue : .secondary)
+                    .foregroundColor(isSelected ? .indigo : .secondary)
                     .font(.title3)
                 
                 // Content
@@ -360,7 +349,7 @@ struct ProjectRowExpandable: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isSelected ? Color.blue.opacity(0.15) : Color.clear)
+                    .fill(isSelected ? Color.indigo.opacity(0.12) : Color.clear)
             )
             .contentShape(Rectangle())
             .onTapGesture {
@@ -414,7 +403,7 @@ struct SessionRowView: View {
             // Mode icon
             Image(systemName: session.mode == "lecture" ? "book.fill" : "bubble.left.and.bubble.right.fill")
                 .font(.caption)
-                .foregroundColor(isSelected ? .blue : .secondary)
+                .foregroundColor(isSelected ? .indigo : .secondary)
                 .frame(width: 16)
             
             VStack(alignment: .leading, spacing: 2) {
@@ -460,7 +449,7 @@ struct SessionRowView: View {
         .padding(.leading, 36)
         .background(
             RoundedRectangle(cornerRadius: 4)
-                .fill(isSelected ? Color.blue.opacity(0.1) : (isHovering ? Color.gray.opacity(0.05) : Color.clear))
+                .fill(isSelected ? Color.indigo.opacity(0.1) : (isHovering ? Color.gray.opacity(0.04) : Color.clear))
         )
         .contentShape(Rectangle())
         .onTapGesture {

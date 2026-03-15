@@ -12,7 +12,17 @@ struct SettingsView: View {
     
     @State private var openaiKey: String = UserDefaults.standard.string(forKey: "openai_api_key") ?? ""
     @State private var elevenlabsKey: String = UserDefaults.standard.string(forKey: "elevenlabs_api_key") ?? ""
+    @State private var backendHost: String = UserDefaults.standard.string(forKey: "backend_host") ?? "127.0.0.1"
+    @State private var backendPort: String = {
+        let storedPort = UserDefaults.standard.integer(forKey: "backend_port")
+        return String((1...65535).contains(storedPort) ? storedPort : 9123)
+    }()
+    @State private var summaryIntervalSeconds: String = {
+        let storedValue = UserDefaults.standard.integer(forKey: "summary_interval_seconds")
+        return String(storedValue > 0 ? storedValue : 30)
+    }()
     @State private var showSaveSuccess = false
+    @State private var validationMessage: String?
     
     // MARK: - Body
     
@@ -45,9 +55,48 @@ struct SettingsView: View {
                 
                 SecureField("sk_...", text: $elevenlabsKey)
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 500)
+                    .frame(maxWidth: 480)
                 
                 Text("Used for real-time speech transcription")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Backend Host")
+                    .font(.headline)
+
+                TextField("127.0.0.1", text: $backendHost)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 260)
+
+                Text("Local backend address used by the app.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Backend Port")
+                    .font(.headline)
+
+                TextField("9123", text: $backendPort)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 180)
+
+                Text("Change this if the default port is already occupied.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Auto Summary Interval")
+                    .font(.headline)
+
+                TextField("30", text: $summaryIntervalSeconds)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 180)
+
+                Text("Main auto-summary interval in seconds. Frontend countdown follows the backend value.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -69,6 +118,12 @@ struct SettingsView: View {
                     .transition(.opacity)
                 }
             }
+
+            if let validationMessage {
+                Text(validationMessage)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
             
             Spacer()
         }
@@ -79,9 +134,30 @@ struct SettingsView: View {
     // MARK: - Methods
     
     private func saveAPIKeys() {
+        let trimmedHost = backendHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else {
+            validationMessage = "Backend host cannot be empty."
+            return
+        }
+
+        guard let port = Int(backendPort), (1...65535).contains(port) else {
+            validationMessage = "Backend port must be between 1 and 65535."
+            return
+        }
+
+        guard let summaryInterval = Int(summaryIntervalSeconds), summaryInterval > 0 else {
+            validationMessage = "Auto summary interval must be a positive number."
+            return
+        }
+
+        validationMessage = nil
+
         // 保存到 UserDefaults
         UserDefaults.standard.set(openaiKey, forKey: "openai_api_key")
         UserDefaults.standard.set(elevenlabsKey, forKey: "elevenlabs_api_key")
+        UserDefaults.standard.set(trimmedHost, forKey: "backend_host")
+        UserDefaults.standard.set(port, forKey: "backend_port")
+        UserDefaults.standard.set(summaryInterval, forKey: "summary_interval_seconds")
         
         // 保存到配置文件
         saveAPIKeysToConfigFile()
@@ -107,18 +183,11 @@ struct SettingsView: View {
         let openaiKeyValue = openaiKey
         let elevenlabsKeyValue = elevenlabsKey
         
-        print("\n" + String(repeating: "=", count: 60))
-        print("💾 STEP 1: Saving API Keys to Config File")
-        print(String(repeating: "=", count: 60))
-        print("OpenAI Key: \(openaiKeyValue.prefix(10))...(\(openaiKeyValue.count) chars)")
-        print("ElevenLabs Key: \(elevenlabsKeyValue.prefix(10))...(\(elevenlabsKeyValue.count) chars)")
         
         let fileManager = FileManager.default
         
         // 获取应用支持目录
         guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            print("❌ Failed to get application support directory")
-            print(String(repeating: "=", count: 60) + "\n")
             return
         }
         
@@ -126,24 +195,16 @@ struct SettingsView: View {
         let appDir = appSupportURL.appendingPathComponent("RealtimeTranscriber")
         let configFile = appDir.appendingPathComponent("api_keys.json")
         
-        print("Config file path: \(configFile.path)")
         
         // 检查目录是否存在
         var isDirectory: ObjCBool = false
         let dirExists = fileManager.fileExists(atPath: appDir.path, isDirectory: &isDirectory)
         
-        print("Directory status:")
-        print("  - Path: \(appDir.path)")
-        print("  - Exists: \(dirExists)")
-        print("  - Is directory: \(isDirectory.boolValue)")
         
         // 创建目录（如果不存在）
         do {
             try fileManager.createDirectory(at: appDir, withIntermediateDirectories: true, attributes: nil)
-            print("✅ Directory created/verified")
         } catch {
-            print("❌ Failed to create directory: \(error)")
-            print(String(repeating: "=", count: 60) + "\n")
             return
         }
         
@@ -153,7 +214,6 @@ struct SettingsView: View {
             "elevenlabs_api_key": elevenlabsKeyValue
         ]
         
-        print("\nJSON content to save:")
         
         do {
             // 编码为 JSON
@@ -161,40 +221,28 @@ struct SettingsView: View {
             
             // 转换为字符串查看
             if let jsonString = String(data: jsonData, encoding: .utf8) {
-                print(jsonString)
             }
             
             // 写入文件
             try jsonData.write(to: configFile, options: .atomic)
-            print("\n✅ File written successfully")
             
             // 验证文件已写入
             if fileManager.fileExists(atPath: configFile.path) {
-                print("✅ File exists after write")
                 
                 // 读取文件大小
                 if let attributes = try? fileManager.attributesOfItem(atPath: configFile.path),
                    let fileSize = attributes[.size] as? Int {
-                    print("✅ File size: \(fileSize) bytes")
                 }
                 
                 // 尝试读回内容验证
                 if let readData = try? Data(contentsOf: configFile),
                    let readString = String(data: readData, encoding: .utf8) {
-                    print("✅ File verification - content read back:")
-                    print(readString)
                 }
             } else {
-                print("❌ File does not exist after write!")
             }
             
-            print(String(repeating: "=", count: 60) + "\n")
             
         } catch {
-            print("❌ Failed to save: \(error)")
-            print("   Error type: \(type(of: error))")
-            print("   Error description: \(error.localizedDescription)")
-            print(String(repeating: "=", count: 60) + "\n")
         }
     }
 }

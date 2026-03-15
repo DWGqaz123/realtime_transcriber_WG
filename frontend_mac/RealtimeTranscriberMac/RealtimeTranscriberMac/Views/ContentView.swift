@@ -27,7 +27,6 @@ struct ContentView: View {
                 .task(id: projectViewModel.selectedProject?.id) {
                     if let project = projectViewModel.selectedProject {
                         viewModel.currentProjectId = project.id
-                        print("📁 Project changed: \(project.name)")
                     }
                 }
                 .onAppear {
@@ -56,7 +55,7 @@ struct RecordingView: View {
             if let project = projectViewModel.selectedProject {
                 HStack {
                     Image(systemName: "folder.fill")
-                        .foregroundColor(.blue)
+                        .foregroundColor(.indigo)
                     
                     Text(project.name)
                         .font(.headline)
@@ -77,9 +76,13 @@ struct RecordingView: View {
                         .foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(8)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial)
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.indigo.opacity(0.2), lineWidth: 1)
+                )
             } else {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -89,7 +92,7 @@ struct RecordingView: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity)
-                .background(Color.orange.opacity(0.1))
+                .background(Color.orange.opacity(0.06))
                 .cornerRadius(8)
             }
             
@@ -134,7 +137,7 @@ struct RecordingView: View {
                     .padding(.vertical, 8)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(viewModel.isRecording ? .red : .blue)
+                .tint(viewModel.isRecording ? .red : .indigo)
                 .disabled(projectViewModel.selectedProject == nil && !viewModel.isRecording)
                 
                 // Save button
@@ -274,7 +277,12 @@ struct RecordingView: View {
                                 )
                             )
                             .frame(
-                                width: geometry.size.width * CGFloat(30 - viewModel.nextSummaryCountdown) / 30.0,
+                                width: max(
+                                    0,
+                                    geometry.size.width
+                                        * CGFloat(viewModel.summaryIntervalSeconds - viewModel.nextSummaryCountdown)
+                                        / CGFloat(max(viewModel.summaryIntervalSeconds, 1))
+                                ),
                                 height: 3
                             )
                             .cornerRadius(1.5)
@@ -285,7 +293,6 @@ struct RecordingView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
             }
-            
             
             
             // 音频电平可视化区域
@@ -371,7 +378,11 @@ struct RecordingView: View {
                     }
                 }
                 .padding()
-                .background(Color.gray.opacity(0.1))
+                .background(Color.gray.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.gray.opacity(0.15), lineWidth: 1)
+                )
                 .cornerRadius(8)
             }
             
@@ -384,7 +395,7 @@ struct RecordingView: View {
                     if viewModel.isRecording {
                         HStack(spacing: 8) {
                             ProgressView()
-                                .scaleEffect(0.8)
+                                .controlSize(.small)
                             Text("Listening...")
                                 .foregroundColor(.secondary)
                         }
@@ -404,8 +415,8 @@ struct RecordingView: View {
                 }
             }
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(viewModel.isRecording ? Color.blue : Color.gray.opacity(0.3), lineWidth: 2)
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(viewModel.isRecording ? Color.indigo.opacity(0.5) : Color.gray.opacity(0.15), lineWidth: 1)
             )
             
             // Full transcript
@@ -488,8 +499,12 @@ struct RecordingView: View {
                         }
                     }
                     .frame(minHeight: 200)
-                    .background(Color.gray.opacity(0.05))
-                    .cornerRadius(8)
+                    .background(Color.gray.opacity(0.03))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.gray.opacity(0.1), lineWidth: 1)
+                    )
                     .onChange(of: viewModel.fullTranscript) { _ in
                         // 🔧 转录内容变化时自动滚动到底部
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
