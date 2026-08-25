@@ -24,7 +24,7 @@ class SearchResult:
 class FAISSIndexManager:
     """FAISS 索引管理器"""
     
-    def __init__(self, dimension: int = EmbeddingConfig.DIMENSION, index_dir: Optional[Path] = None):
+    def __init__(self, dimension: Optional[int] = None, index_dir: Optional[Path] = None):
         """
         初始化 FAISS 索引管理器
         
@@ -32,8 +32,8 @@ class FAISSIndexManager:
             dimension: 向量维度（默认 384，对应 MiniLM）
             index_dir: 索引存储目录
         """
-        self.dimension = dimension
-        
+        self.dimension = dimension or EmbeddingConfig.DIMENSION
+
         # 设置索引存储目录
         if index_dir is None:
             self.index_dir = Path.home() / "Library" / "Application Support" / "RealtimeTranscriber" / "faiss_indices"
@@ -50,12 +50,12 @@ class FAISSIndexManager:
         
     
     def _get_index_path(self, project_id: int) -> Path:
-        """获取项目的索引文件路径"""
-        return self.index_dir / f"project_{project_id}.index"
-    
+        """获取项目的索引文件路径（含维度，避免换 embedding 模型后误读旧索引）"""
+        return self.index_dir / f"project_{project_id}_d{self.dimension}.index"
+
     def _get_mapping_path(self, project_id: int) -> Path:
         """获取项目的 ID 映射文件路径"""
-        return self.index_dir / f"project_{project_id}_mapping.pkl"
+        return self.index_dir / f"project_{project_id}_d{self.dimension}_mapping.pkl"
     
     def create_index(self, project_id: int) -> faiss.Index:
         """
@@ -93,6 +93,12 @@ class FAISSIndexManager:
         
         try:
             index = faiss.read_index(str(index_path))
+            if index.d != self.dimension:
+                log.warning(
+                    "Ignoring FAISS index for project %d: dimension %d != expected %d",
+                    project_id, index.d, self.dimension,
+                )
+                return None
             self.indices[project_id] = index
             if mapping_path.exists():
                 with open(mapping_path, "rb") as f:
@@ -150,6 +156,14 @@ class FAISSIndexManager:
                 index = self.create_index(project_id)
 
         index = self.indices[project_id]
+
+        if embeddings.ndim != 2 or embeddings.shape[0] != len(summary_ids):
+            log.error(
+                "add_vectors shape mismatch: embeddings=%s, summary_ids=%d",
+                getattr(embeddings, "shape", None), len(summary_ids),
+            )
+            return []
+
         faiss.normalize_L2(embeddings)
 
         start_id = index.ntotal
@@ -213,6 +227,17 @@ class FAISSIndexManager:
         
         return results
     
+    def reset_index(self, project_id: int) -> None:
+        """丢弃项目的索引与映射（内存 + 磁盘），供重新索引使用。"""
+        self.indices.pop(project_id, None)
+        self.id_mappings.pop(project_id, None)
+        for path in (self._get_index_path(project_id), self._get_mapping_path(project_id)):
+            try:
+                path.unlink(missing_ok=True)
+            except Exception as exc:
+                log.warning("Failed to remove %s: %s", path, exc)
+        log.info("Reset FAISS index for project %d", project_id)
+
     def get_index(self, project_id: int) -> Optional[faiss.Index]:
         """获取项目的索引（自动加载）"""
         if project_id not in self.indices:

@@ -106,6 +106,7 @@ class TranscriptionConfig:
     LECTURE = ModeConfig(
         commit_strategy="manual",
         commit_interval=35.0,
+        language_code=_lang,
         vad_silence_threshold_secs=None,
         vad_threshold=None,
         min_speech_duration_ms=None,
@@ -115,6 +116,7 @@ class TranscriptionConfig:
     DISCUSSION = ModeConfig(
         commit_strategy="vad",
         commit_interval=None,
+        language_code=_lang,
         vad_silence_threshold_secs=0.5,
         vad_threshold=0.4,
         min_speech_duration_ms=300,
@@ -188,24 +190,52 @@ class SummaryConfig:
 
 
 class EmbeddingConfig:
-    """Embedding 配置（默认使用 Hugging Face Inference API）。"""
+    """Embedding 配置。
 
-    PROVIDER: str = "huggingface"
-    MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    DIMENSION: int = 384
+    默认使用 OpenAI embeddings：摘要功能已经要求用户配置 OPENAI_API_KEY，
+    复用它可以避免再申请第二个服务的 key。设 EMBEDDING_PROVIDER=huggingface
+    可切回 HF（此时需要单独提供 HUGGINGFACE_API_KEY）。
+    """
+
+    PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "openai").strip().lower()
+    _IS_OPENAI: bool = PROVIDER != "huggingface"
+
+    MODEL: str = (
+        "text-embedding-3-small"
+        if _IS_OPENAI
+        else "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
+    DIMENSION: int = 1536 if _IS_OPENAI else 384
     BATCH_SIZE: int = 16
     TIMEOUT_SECONDS: float = 30.0
-    API_BASE_URL: str = "https://api-inference.huggingface.co/pipeline/feature-extraction"
 
-    @staticmethod
-    def get_api_key() -> str:
-        return HUGGINGFACE_API_KEY
+    _OPENAI_API_URL: str = "https://api.openai.com/v1/embeddings"
+    # api-inference.huggingface.co 已下线，新入口是 router.huggingface.co
+    _HF_BASE_URL: str = "https://router.huggingface.co/hf-inference/models"
 
     @classmethod
-    def get_api_url(cls, model_name: str) -> str:
+    def is_openai(cls) -> bool:
+        return cls._IS_OPENAI
+
+    @classmethod
+    def get_api_key(cls) -> str:
+        return OPENAI_API_KEY if cls._IS_OPENAI else HUGGINGFACE_API_KEY
+
+    @classmethod
+    def get_api_url(cls, model_name: str = "") -> str:
+        if cls._IS_OPENAI:
+            return cls._OPENAI_API_URL
         model = model_name or cls.MODEL
-        return f"{cls.API_BASE_URL}/{model}"
-    
+        return f"{cls._HF_BASE_URL}/{model}/pipeline/feature-extraction"
+
+    @classmethod
+    def print_config(cls):
+        log.info(
+            "Embedding Config: provider=%s, model=%s, dim=%d, key=%s",
+            cls.PROVIDER, cls.MODEL, cls.DIMENSION,
+            "ok" if cls.get_api_key() else "MISSING",
+        )
+
 # ==================== 日志配置 ====================
 
 class LogConfig:

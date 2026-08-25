@@ -12,8 +12,6 @@ import logging
 
 log = logging.getLogger("transcriber.main")
 
-# logging.basicConfig(level=logging.INFO)
-
 
 def get_backend_host() -> str:
     return os.getenv("HOST", "0.0.0.0")
@@ -36,6 +34,17 @@ if getattr(sys, 'frozen', False):
     
     log.info("Backend log started: %s", log_file)
 
+# ==================== 日志初始化 ====================
+# 必须在上面的 stdout/stderr 重定向之后配置，否则 handler 会绑到旧的流上。
+# 没有这一步，所有 log.info 都会被丢弃（只有 warning 以上能靠 lastResort 露出来），
+# 排查问题时看不到启动配置和会话事件。
+logging.basicConfig(
+    level=logging.DEBUG if os.getenv("LOG_MODE", "quiet").lower() in ("verbose", "debug") else logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    force=True,
+)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 # ==================== 加载环境变量 ====================
 
 env_path = Path(__file__).parent / ".env"
@@ -44,7 +53,7 @@ load_dotenv()
 
 # ==================== 导入配置和服务 ====================
 
-from config import LogConfig, SummaryConfig, ELEVENLABS_API_KEY
+from config import LogConfig, SummaryConfig, EmbeddingConfig, ELEVENLABS_API_KEY
 from session_manager import SessionManager
 from routes import projects, search
 
@@ -77,6 +86,8 @@ async def lifespan(app: FastAPI):
     LogConfig.print_config()
     
     SummaryConfig.print_config()
+
+    EmbeddingConfig.print_config()
     
     public_host = os.getenv("PUBLIC_HOST", os.getenv("HOST", "127.0.0.1"))
     public_port = get_backend_port()

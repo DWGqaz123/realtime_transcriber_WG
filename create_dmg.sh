@@ -2,7 +2,7 @@
 # create_dmg.sh - 创建 DMG 安装包
 set -e
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 DMG_NAME="RealtimeTranscriber_v${VERSION}.dmg"
 ARCHIVES_DIR="$HOME/Library/Developer/Xcode/Archives"
 

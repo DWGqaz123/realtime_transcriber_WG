@@ -8,8 +8,19 @@
 
 import SwiftUI
 
+/// 负责在 App 退出时关掉后端子进程。
+/// 没有这一步，backend 会留在后台占着端口，下次启动就连不上。
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var backendManager: BackendManager?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        backendManager?.stopBackend()
+    }
+}
+
 @main
 struct RealtimeTranscriberMacApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var backendManager = BackendManager()
     
     var body: some Scene {
@@ -17,6 +28,7 @@ struct RealtimeTranscriberMacApp: App {
             ContentView()
                 .environmentObject(backendManager)
                 .onAppear {
+                    appDelegate.backendManager = backendManager
                     // 🔧 设置通知监听器
                     setupNotificationObservers()
                     
@@ -38,7 +50,7 @@ struct RealtimeTranscriberMacApp: App {
                                     .foregroundColor: NSColor.secondaryLabelColor
                                 ]
                             ),
-                            .applicationVersion: "1.0.0"
+                            .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
                         ]
                     )
                 }
@@ -61,12 +73,12 @@ struct RealtimeTranscriberMacApp: App {
             object: nil,
             queue: .main
         ) { [backendManager] _ in
-            // 停止后端
+            // 停止后端（stopBackend 会等它真正退出）
             backendManager.stopBackend()
-            
-            // 延迟 1 秒后重启
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                backendManager.startBackend()
+
+            // 重启时必须新起进程，不能复用可能还在跑的旧实例（否则新 key 不生效）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                backendManager.startBackend(reuseExisting: false)
             }
         }
     }

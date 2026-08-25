@@ -7,6 +7,7 @@
 // BackendManager.swift
 import Foundation
 import Combine
+import Darwin
 
 class BackendManager: ObservableObject {
     @Published var isRunning = false
@@ -28,7 +29,39 @@ class BackendManager: ObservableObject {
         }
     }
     
-    func startBackend() {
+    /// 启动后端。`reuseExisting` 为 true 时，若端口上已有健康的后端就直接复用，
+    /// 避免第二个实例抢占端口后启动失败（重启配置时必须传 false）。
+    func startBackend(reuseExisting: Bool = true) {
+        guard reuseExisting else {
+            launchBackendProcess()
+            return
+        }
+
+        probeExistingBackend { [weak self] isAlive in
+            guard let self = self else { return }
+            if isAlive {
+                self.isRunning = true
+                self.error = nil
+                self.healthCheckAttempts = 0
+                return
+            }
+            self.launchBackendProcess()
+        }
+    }
+
+    /// 短超时探测端口上是否已经有一个可用后端
+    private func probeExistingBackend(completion: @escaping (Bool) -> Void) {
+        var request = URLRequest(url: AppConfig.healthURL)
+        request.timeoutInterval = 1.5
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            let isAlive = (response as? HTTPURLResponse)?.statusCode == 200
+            DispatchQueue.main.async { completion(isAlive) }
+        }.resume()
+    }
+
+    private func launchBackendProcess() {
         // 查找后端可执行文件
         guard let backendPath = Bundle.main.path(forResource: "backend", ofType: nil) else {
             let message = "❌ Backend executable not found in bundle"
@@ -83,6 +116,10 @@ class BackendManager: ObservableObject {
         if let elevenlabsKey = UserDefaults.standard.string(forKey: "elevenlabs_api_key"), !elevenlabsKey.isEmpty {
             environment["ELEVENLABS_API_KEY"] = elevenlabsKey
         } else {
+        }
+
+        if let language = UserDefaults.standard.string(forKey: "transcription_language") {
+            environment["TRANSCRIPTION_LANGUAGE"] = language
         }
 
         let summaryInterval = UserDefaults.standard.integer(forKey: "summary_interval_seconds")
@@ -182,33 +219,47 @@ class BackendManager: ObservableObject {
         }.resume()
     }
     
+    /// 停止后端并**等待它真正退出**。调用方（退出 App / 重启配置）依赖这一点：
+    /// 残留进程会占住端口，让下一次启动连不上。
     func stopBackend() {
         // Clear pipe handlers before stopping to prevent retain cycles
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         errorPipe?.fileHandleForReading.readabilityHandler = nil
-        
+
         if let proc = process, proc.isRunning {
-            proc.terminate()
-            
-            // Give the process a moment then force-kill if still alive
-            let procRef = proc
-            DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-                if procRef.isRunning {
-                    procRef.interrupt()
-                }
-            }
+            BackendManager.terminateAndWait(proc)
         }
-        
+
         process = nil
         outputPipe = nil
         errorPipe = nil
         isRunning = false
+        healthCheckAttempts = 0
     }
-    
+
+    /// SIGTERM，最多等 `timeout` 秒，仍未退出则 SIGKILL。
+    /// PyInstaller 的 onefile bootloader 会把信号转发给它派生的子进程。
+    private static func terminateAndWait(_ proc: Process, timeout: TimeInterval = 3.0) {
+        let pid = proc.processIdentifier
+        proc.terminate()
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while proc.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        if proc.isRunning {
+            kill(pid, SIGKILL)
+            proc.waitUntilExit()
+        }
+    }
+
     deinit {
         // Inline cleanup to avoid using self in async context during deallocation
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         errorPipe?.fileHandleForReading.readabilityHandler = nil
-        process?.terminate()
+        if let proc = process, proc.isRunning {
+            BackendManager.terminateAndWait(proc, timeout: 1.0)
+        }
     }
 }

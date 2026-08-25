@@ -193,7 +193,7 @@ async def get_session_detail(project_id: int, session_id: int):
             id=s.id,
             content=s.content,
             created_at=s.created_at,
-            sentence_count=s.end_sentence_idx - s.start_sentence_idx + 1,
+            sentence_count=max(0, (s.end_sentence_idx or 0) - (s.start_sentence_idx or 0)),
             duration_seconds=s.duration_seconds,
             start_sentence_idx=s.start_sentence_idx,
             end_sentence_idx=s.end_sentence_idx,

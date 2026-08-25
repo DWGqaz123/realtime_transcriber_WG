@@ -2,12 +2,15 @@
 搜索路由 - 语义搜索 API
 """
 
+import asyncio
+
 from fastapi import APIRouter, Query, HTTPException
 from typing import List
 from pydantic import BaseModel
 
 from embedding_service import get_embedding_service
 from faiss_manager import get_faiss_manager
+from indexing_service import get_indexing_service
 from database.db import DatabaseManager
 from database.models import Summary, Session as DBSession, Embedding
 
@@ -68,7 +71,7 @@ async def search_in_project(
         
         # Step 2: 向量化查询
         embedding_service = get_embedding_service()
-        query_embedding = embedding_service.embed_text(query)
+        query_embedding = await asyncio.to_thread(embedding_service.embed_text, query)
         
         # Step 3: FAISS 向量搜索
         faiss_manager = get_faiss_manager()
@@ -129,6 +132,16 @@ async def search_in_project(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+@router.post("/projects/{project_id}/reindex")
+async def reindex_project(project_id: int):
+    """清空并重建项目的向量索引（换 embedding 模型或修复索引后调用）。"""
+    require_project(project_id)
+    result = await get_indexing_service().reindex_project(project_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Reindex failed"))
+    return result
 
 
 @router.get("/projects/{project_id}/stats")

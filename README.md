@@ -29,7 +29,7 @@
 
 ## Requirements
 
-- macOS 12.0 (Monterey) or later
+- macOS 13.5 (Ventura) or later
 - Apple Silicon or Intel
 - Internet connection (for transcription and summarization APIs)
 
@@ -90,7 +90,7 @@ After a session ends, embedding and indexing happen in a background `asyncio` ta
 | Backend | Python / FastAPI |
 | Transcription | ElevenLabs Scribe v2 |
 | Summarization | OpenAI GPT-4o |
-| Search | FAISS + SentenceTransformers |
+| Search | FAISS + OpenAI embeddings |
 | Database | SQLite via SQLAlchemy |
 
 ---

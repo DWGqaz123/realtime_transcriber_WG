@@ -19,9 +19,37 @@ struct Summary: Identifiable, Codable, Hashable {
     let duration: Int?
     
     // 计算属性：解析时间
+    // 后端发的是 datetime.utcnow().isoformat()：无时区、6 位小数，
+    // 纯 ISO8601DateFormatter 解析不了，会静默退化成 Date()（永远显示"刚刚"）。
     var timestamp: Date {
-        let formatter = ISO8601DateFormatter()
-        return formatter.date(from: created_at) ?? Date()
+        Summary.parseTimestamp(created_at) ?? Date()
+    }
+
+    private static let utcFormatters: [DateFormatter] = ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
+                                                         "yyyy-MM-dd'T'HH:mm:ss"].map { format in
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = format
+        return f
+    }
+
+    private static let iso8601Formatters: [ISO8601DateFormatter] = {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return [withFraction, plain]
+    }()
+
+    static func parseTimestamp(_ value: String) -> Date? {
+        for formatter in iso8601Formatters {
+            if let date = formatter.date(from: value) { return date }
+        }
+        for formatter in utcFormatters {
+            if let date = formatter.date(from: value) { return date }
+        }
+        return nil
     }
     
     enum CodingKeys: String, CodingKey {

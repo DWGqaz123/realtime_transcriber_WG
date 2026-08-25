@@ -32,10 +32,15 @@ class SessionManager:
     - Delegate summary work to SummaryHandler.
     """
 
+    # 断线后保留会话状态的时间窗口，供客户端凭 client_id 续接
+    RECOVERY_TTL_SECONDS = 120
+
     def __init__(self, api_key: Optional[str] = None):
         log.info("SessionManager initializing...")
 
         self.sessions: Dict[str, LiveSession] = {}
+        # client_id -> (expires_at, state)
+        self._recoverable: Dict[str, tuple] = {}
         self._api_key = api_key or os.getenv("ELEVENLABS_API_KEY", "")
         if not self._api_key:
             log.warning("No ElevenLabs API key available!")
@@ -109,6 +114,8 @@ class SessionManager:
             except Exception as exc:
                 log.warning("Error closing ElevenLabs client: %s", exc)
 
+        self._preserve_for_recovery(session)
+
         try:
             from fastapi.websockets import WebSocketState
             if (
@@ -121,6 +128,94 @@ class SessionManager:
 
         del self.sessions[session_id]
         log.info("Session %s cleaned up", session_id)
+
+    # ── Disconnect recovery ──────────────────────────────────────────────────
+
+    def _prune_recoverable(self) -> None:
+        now = time.time()
+        for client_id in [k for k, (expires, _) in self._recoverable.items() if expires < now]:
+            self._recoverable.pop(client_id, None)
+
+    def _preserve_for_recovery(self, session: LiveSession) -> None:
+        """A dropped WebSocket used to discard the whole session.
+
+        Flush what was transcribed so far to the DB, then keep the state around
+        briefly so a reconnecting client can continue into the same DB row
+        instead of starting a second, half-empty session.
+        """
+        if not session.transcript_parts or session.db_session_id is None:
+            return
+
+        if not session.is_saved:
+            try:
+                self.persistence.save_session(session)
+                log.info(
+                    "Flushed unsaved transcript on disconnect: db_session=%s, %d sentences",
+                    session.db_session_id, len(session.transcript_parts),
+                )
+            except Exception as exc:
+                log.error("Failed to flush transcript on disconnect: %s", exc, exc_info=True)
+
+        client_id = session.meta.get("client_id")
+        if not client_id:
+            return
+
+        self._prune_recoverable()
+        self._recoverable[client_id] = (
+            time.time() + self.RECOVERY_TTL_SECONDS,
+            {
+                "db_session_id": session.db_session_id,
+                "transcript_parts": list(session.transcript_parts),
+                "context_cache": list(session.context_cache),
+                "summary_count": session.summary_count,
+                "next_start_sentence_idx": session.next_start_sentence_idx,
+                "start_time": session.start_time,
+                "started_at": session.started_at,
+                "project_id": session.meta.get("project_id"),
+                "mode": session.meta.get("mode"),
+            },
+        )
+        log.info("Session state kept for client %s (%ds)", client_id, self.RECOVERY_TTL_SECONDS)
+
+    async def _handle_client_command(self, session: LiveSession, text: str) -> None:
+        client_id = text.split(":", 1)[1].strip()
+        if not client_id:
+            await self._send_session_event(session, "error", {"message": "Invalid client_id"})
+            return
+
+        session.meta["client_id"] = client_id
+        self._prune_recoverable()
+
+        entry = self._recoverable.pop(client_id, None)
+        if entry is None:
+            await self._send_session_event(session, "config", {"client_id": client_id, "resumed": False})
+            return
+
+        state = entry[1]
+        session.db_session_id = state["db_session_id"]
+        session.transcript_parts = list(state["transcript_parts"])
+        session.context_cache = list(state["context_cache"])
+        session.summary_count = state["summary_count"]
+        session.next_start_sentence_idx = state["next_start_sentence_idx"]
+        session.start_time = state["start_time"]
+        session.started_at = state["started_at"]
+        # 复用同一条 DB 记录：_prepare_database_session 只在 is_saved 时才新建
+        session.is_saved = False
+        if state["project_id"] is not None:
+            session.meta["project_id"] = state["project_id"]
+        if state["mode"]:
+            session.meta["mode"] = state["mode"]
+
+        log.info(
+            "Resumed client %s: db_session=%s, %d sentences",
+            client_id, session.db_session_id, len(session.transcript_parts),
+        )
+        await self._send_session_event(session, "config", {
+            "client_id": client_id,
+            "resumed": True,
+            "session_id": session.db_session_id,
+            "sentences": len(session.transcript_parts),
+        })
 
     # ── ElevenLabs connection management ─────────────────────────────────────
 
@@ -201,12 +296,15 @@ class SessionManager:
 
     # ── Database helpers ─────────────────────────────────────────────────────
 
-    def _reset_summary_state(self, session: LiveSession) -> None:
+    def _reset_summary_state(self, session: LiveSession, reset_timeline: bool = True) -> None:
         session.last_summary_time = time.time()
         session.ingestion_buffer.clear()
         session.context_cache.clear()
         session.is_generating = False
-        session.summary_count = 0
+        if reset_timeline:
+            session.summary_count = 0
+            session.next_start_sentence_idx = 0
+            session.start_time = time.time()
 
     def _prepare_database_session(self, session: LiveSession, mode: str) -> None:
         project_id = session.meta.get("project_id")
@@ -216,7 +314,9 @@ class SessionManager:
         try:
             if session.db_session_id is not None and not session.is_saved:
                 log.info("Reusing existing DB session: %s", session.db_session_id)
-                self._reset_summary_state(session)
+                # Keep summary_count / sentence cursor / start_time: the recording
+                # continues into the same DB row.
+                self._reset_summary_state(session, reset_timeline=False)
                 return
             db_session = DatabaseManager.create_session(project_id=project_id, mode=mode)
             session.db_session_id = db_session.id
@@ -414,7 +514,9 @@ class SessionManager:
         stripped = text.strip()
         upper = stripped.upper()
 
-        if upper.startswith("PROJECT_ID:"):
+        if upper.startswith("CLIENT_ID:"):
+            await self._handle_client_command(session, stripped)
+        elif upper.startswith("PROJECT_ID:"):
             await self._handle_project_command(session, stripped)
         elif upper.startswith("MODE:"):
             await self._handle_mode_command(session, stripped)
@@ -442,7 +544,7 @@ class SessionManager:
             session.transcript_parts.append(stripped)
             session.ingestion_buffer.append(stripped)
 
-            if self.summary_handler.should_generate(session):
+            if self.summary_handler.try_begin(session):
                 if LogConfig.LOG_SUMMARY:
                     log.info("Summary trigger met, initiating generation")
                 try:

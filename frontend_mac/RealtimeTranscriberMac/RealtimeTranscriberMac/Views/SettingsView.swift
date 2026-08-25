@@ -55,7 +55,7 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 500)
                 
-                Text("Used for generating summaries with GPT-4")
+                Text("Used for generating summaries and for semantic search embeddings")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

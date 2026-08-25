@@ -3,6 +3,8 @@
 负责将摘要向量化并存储到 FAISS 索引
 """
 
+import asyncio
+import logging
 from typing import List, Optional
 from datetime import datetime
 
@@ -10,6 +12,8 @@ from database.db import DatabaseManager
 from database.models import Summary, Embedding
 from embedding_service import get_embedding_service
 from faiss_manager import get_faiss_manager
+
+log = logging.getLogger("transcriber.indexing")
 
 
 class IndexingService:
@@ -56,10 +60,20 @@ class IndexingService:
             
             
             # Step 3: 批量向量化
+            # 空内容会让 embed_batch 与 summary_ids 错位，这里先剔除
+            indexable = [s for s in summaries if s.content and s.content.strip()]
+            skipped = len(summaries) - len(indexable)
+            if skipped:
+                log.warning("Skipping %d summaries with empty content", skipped)
+            if not indexable:
+                return {"success": True, "indexed": 0, "message": "No indexable summaries"}
+
+            summaries = indexable
             texts = [s.content for s in summaries]
             summary_ids = [s.id for s in summaries]
-            
-            embeddings = self.embedding_service.embed_batch(texts)
+
+            # embed_batch 是同步 HTTP 调用，放到线程里以免阻塞事件循环
+            embeddings = await asyncio.to_thread(self.embedding_service.embed_batch, texts)
             
             # Step 4: 添加到 FAISS 索引，直接获得分配的 faiss ID 列表
             assigned_faiss_ids = self.faiss_manager.add_vectors(
@@ -106,6 +120,38 @@ class IndexingService:
         finally:
             db.close()
     
+    async def reindex_project(self, project_id: int) -> dict:
+        """清空并重建项目索引（换 embedding 模型后使用）。"""
+        db = DatabaseManager.get_db()
+        try:
+            from database.models import Session as DBSession
+
+            summary_ids = [
+                row[0]
+                for row in db.query(Summary.id)
+                .join(DBSession)
+                .filter(DBSession.project_id == project_id)
+                .all()
+            ]
+            if summary_ids:
+                db.query(Embedding).filter(Embedding.summary_id.in_(summary_ids)).delete(
+                    synchronize_session=False
+                )
+                db.query(Summary).filter(Summary.id.in_(summary_ids)).update(
+                    {Summary.is_indexed: False, Summary.indexed_at: None},
+                    synchronize_session=False,
+                )
+                db.commit()
+        except Exception as e:
+            db.rollback()
+            log.error("Failed to reset index metadata: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+        finally:
+            db.close()
+
+        self.faiss_manager.reset_index(project_id)
+        return await self.index_project_summaries(project_id)
+
     async def index_project_summaries(self, project_id: int) -> dict:
         """
         索引某个项目的所有未索引摘要

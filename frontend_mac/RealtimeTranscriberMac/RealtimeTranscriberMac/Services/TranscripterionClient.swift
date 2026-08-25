@@ -11,6 +11,7 @@ final class TranscriptionClient: NSObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession?
     private var currentProjectId: String = "" // 项目Id
+    private var clientId: String = ""          // 录音会话的稳定标识，用于断线续接
     private let fixedServerURL: URL?
     private var isConnected: Bool = false          // 当前 WS 是否已经完成握手并且打开
     private var shouldReconnect: Bool = false      // 是否需要自动重连
@@ -56,15 +57,21 @@ final class TranscriptionClient: NSObject {
         
         shouldReconnect = true
         reconnectAttempts = 0
-        
-        
+
+        // 一次录音会话内保持不变；后端凭它在断线重连后续接同一条记录
+        if clientId.isEmpty {
+            clientId = UUID().uuidString
+        }
+
         let session = ensureSession()
         
         webSocketTask = session.webSocketTask(with: serverURL)
         webSocketTask?.resume()
-        
+
         // 注意：此时握手还没完成，isConnected 仍然是 false
         startReceiving()  // 等待 didOpenWithProtocol 回调来设置 isConnected = true
+
+        send(text: "CLIENT_ID:\(clientId)")
     }
     
     /// 自动重连逻辑（带指数退避）
@@ -102,6 +109,11 @@ final class TranscriptionClient: NSObject {
             // ⚠️ 不要在这里把 isConnected 设为 true，
             // 只在 didOpenWithProtocol 里设，代表握手真正成功。
             
+            // 先认领旧会话，再补发配置——顺序决定了后端是续接还是新建
+            if !self.clientId.isEmpty {
+                self.send(text: "CLIENT_ID:\(self.clientId)")
+            }
+
             // 重新发送模式配置（如果已经有）
             if !self.currentProjectId.isEmpty {
                 self.send(text: "PROJECT_ID:\(self.currentProjectId)")
@@ -121,6 +133,8 @@ final class TranscriptionClient: NSObject {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         currentProjectId = ""
+        currentMode = ""
+        clientId = ""
         
         // Invalidate session to break the delegate retain cycle
         // ensureSession() will recreate it on next connect()

@@ -175,6 +175,37 @@ struct SearchView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
+
+            Divider()
+                .frame(maxWidth: 240)
+
+            VStack(spacing: 6) {
+                Text("Summaries recorded before an embedding-model change are not searchable until the index is rebuilt.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+
+                Button {
+                    Task { await viewModel.reindex(projectId: project.id) }
+                } label: {
+                    if viewModel.isReindexing {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Rebuilding index...")
+                        }
+                    } else {
+                        Text("Rebuild Index")
+                    }
+                }
+                .disabled(viewModel.isReindexing)
+
+                if let status = viewModel.statusMessage {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)

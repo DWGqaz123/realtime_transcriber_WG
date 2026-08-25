@@ -21,7 +21,22 @@ class SummaryHandler:
 
     # ── Trigger check ────────────────────────────────────────────────────────
 
+    def try_begin(self, session: Any) -> bool:
+        """Check the trigger and claim the generation slot in one step.
+
+        Claiming here rather than inside the spawned task closes the window where
+        a second final transcript arriving during inference starts an overlapping
+        generation (LLM latency is 2-5s, well above the trigger interval).
+        """
+        if not self.should_generate(session):
+            return False
+        session.is_generating = True
+        return True
+
     def should_generate(self, session: Any) -> bool:
+        if session.is_generating:
+            return False
+
         elapsed = time.time() - session.last_summary_time
 
         if not (
@@ -54,12 +69,17 @@ class SummaryHandler:
 
         snapshot = session.ingestion_buffer.copy()
         session.ingestion_buffer.clear()
-        session.is_generating = True
 
         if not snapshot:
             log.warning("Empty snapshot, aborting")
-            session.is_generating = False
+            self._cleanup(session)
             return
+
+        # Fix 3: advance the cursor as soon as the sentences are consumed, so each
+        # summary records the real span instead of everyone claiming index 0.
+        start_idx = session.next_start_sentence_idx
+        end_idx = start_idx + len(snapshot)
+        session.next_start_sentence_idx = end_idx
 
         current_text = "\n".join(snapshot)
         context = "\n".join(session.context_cache)
@@ -81,13 +101,12 @@ class SummaryHandler:
         if session.db_session_id:
             try:
                 duration = int(time.time() - session.last_summary_time)
-                start_idx = session.next_start_sentence_idx
                 summary = DatabaseManager.create_summary(
                     session_id=session.db_session_id,
                     content=summary_content,
                     source_text=current_text[:500],
                     start_sentence_idx=start_idx,
-                    end_sentence_idx=start_idx + len(snapshot),
+                    end_sentence_idx=end_idx,
                     duration_seconds=duration,
                 )
                 session.summary_count += 1
@@ -113,6 +132,7 @@ class SummaryHandler:
     # ── Final summary (on STOP) ──────────────────────────────────────────────
 
     async def generate_final(self, session: Any, send_fn: SendFn) -> None:
+        session.is_generating = True
         try:
             summary_data = await self.persistence.create_final_summary(session)
             if summary_data is None:
@@ -122,6 +142,8 @@ class SummaryHandler:
             await send_fn("summary", summary_data)
         except Exception as e:
             log.error("Final summary failed: %s", e, exc_info=True)
+        finally:
+            self._cleanup(session)
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 

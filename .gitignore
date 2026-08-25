@@ -68,6 +68,8 @@ backend/models/
 backend/build/
 backend/dist/
 backend/*.spec
+# backend.spec 是构建产物的配方，必须入库（曾经被这条规则误伤过）
+!backend/backend.spec
 
 ####################################
 # Jupyter / IPython
@@ -93,6 +95,8 @@ build/
 *.xcuserstate
 *.xcuserdata/
 *.xcworkspace/xcuserdata/
+# .xcodeproj 下的目录名就叫 xcuserdata，上面两条匹配不到
+**/xcuserdata/
 
 ####################################
 # IDEs / Editors
