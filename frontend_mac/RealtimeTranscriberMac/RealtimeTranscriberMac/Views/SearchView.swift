@@ -62,6 +62,7 @@ struct SearchView: View {
     // MARK: - Search Box
     
     private var searchBoxView: some View {
+        VStack(spacing: 10) {
         HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
@@ -95,9 +96,35 @@ struct SearchView: View {
             .buttonStyle(.borderedProminent)
             .disabled(viewModel.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isSearching)
         }
-        .padding()
-        .background(Color.gray.opacity(0.03))
+        .padding(.horizontal)
+        .padding(.top)
 
+        HStack(spacing: 12) {
+            Picker("", selection: $viewModel.mode) {
+                ForEach(SearchMode.allCases) { m in
+                    Text(m.label).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 260)
+            .onChange(of: viewModel.mode) { _ in
+                guard !viewModel.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                Task { await viewModel.search(in: project.id) }
+            }
+
+            if viewModel.hasSearched {
+                Text("语义 \(viewModel.lastSemanticHits) · 关键词 \(viewModel.lastKeywordHits)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 12)
+        }
+        .background(Color.gray.opacity(0.03))
     }
     
     // MARK: - Results List
@@ -270,20 +297,38 @@ struct SearchResultCard: View {
         Button(action: onTap) {  // 🔧 包裹在 Button 中
             VStack(alignment: .leading, spacing: 12) {
                 // Header with similarity score
-                HStack {
-                    // Similarity badge
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                            .font(.caption2)
-                        Text(result.formattedSimilarity)
-                            .font(.caption)
-                            .fontWeight(.medium)
+                HStack(spacing: 6) {
+                    // 语义命中：显示余弦相似度
+                    if result.matchedSemantic || result.sources == nil {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sparkles")
+                                .font(.caption2)
+                            Text(result.formattedSimilarity)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(6)
                     }
-                    .foregroundColor(.orange)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.1))
-                    .cornerRadius(6)
+
+                    // 关键词命中：BM25 没有直观量纲，只标出处
+                    if result.matchedKeyword {
+                        HStack(spacing: 4) {
+                            Image(systemName: "text.magnifyingglass")
+                                .font(.caption2)
+                            Text("keyword")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(6)
+                    }
                     
                     Spacer()
                     

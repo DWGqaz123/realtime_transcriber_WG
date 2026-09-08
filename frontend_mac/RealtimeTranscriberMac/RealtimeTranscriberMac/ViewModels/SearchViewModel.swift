@@ -2,6 +2,18 @@ import Foundation
 import Combine
 // MARK: - Data Models
 
+enum SearchMode: String, CaseIterable, Identifiable {
+    case hybrid, semantic, keyword
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .hybrid: return "Hybrid"
+        case .semantic: return "Semantic"
+        case .keyword: return "Keyword"
+        }
+    }
+}
+
 struct SearchResult: Identifiable, Codable {
     let summary_id: Int
     let content: String
@@ -9,8 +21,14 @@ struct SearchResult: Identifiable, Codable {
     let session_id: Int
     let session_mode: String
     let created_at: String
-    
+    let score: Double?
+    let bm25: Double?
+    let sources: [String]?
+
     var id: Int { summary_id }
+
+    var matchedSemantic: Bool { sources?.contains("semantic") ?? false }
+    var matchedKeyword: Bool { sources?.contains("keyword") ?? false }
     
     var formattedSimilarity: String {
         String(format: "%.0f%%", similarity * 100)
@@ -33,6 +51,9 @@ struct SearchResponse: Codable {
     let query: String
     let total: Int
     let results: [SearchResult]
+    let mode: String?
+    let semantic_hits: Int?
+    let keyword_hits: Int?
 }
 
 // MARK: - ViewModel
@@ -46,6 +67,9 @@ class SearchViewModel: ObservableObject {
     @Published var hasSearched: Bool = false
     @Published var isReindexing: Bool = false
     @Published var statusMessage: String?
+    @Published var mode: SearchMode = .hybrid
+    @Published var lastSemanticHits: Int = 0
+    @Published var lastKeywordHits: Int = 0
 
     private let searchService = SearchService()
 
@@ -85,9 +109,12 @@ class SearchViewModel: ObservableObject {
             let searchResponse = try await searchService.search(
                 projectId: projectId,
                 query: searchQuery.trimmingCharacters(in: .whitespaces),
-                topK: topK
+                topK: topK,
+                mode: mode.rawValue
             )
             self.results = searchResponse.results
+            self.lastSemanticHits = searchResponse.semantic_hits ?? 0
+            self.lastKeywordHits = searchResponse.keyword_hits ?? 0
         } catch {
             errorMessage = "Search failed: \(error.localizedDescription)"
         }

@@ -182,7 +182,8 @@ class FAISSIndexManager:
         self,
         project_id: int,
         query_embedding: np.ndarray,
-        top_k: int = 10
+        top_k: int = 10,
+        min_similarity: float = 0.0,
     ) -> List[SearchResult]:
         """
         搜索最相似的向量
@@ -191,7 +192,10 @@ class FAISSIndexManager:
             project_id: 项目 ID
             query_embedding: 查询向量 (dimension,)
             top_k: 返回结果数量
-            
+            min_similarity: 相似度下限。IndexFlatIP 永远会返回 top_k 条，
+                哪怕全是噪音（实测无关查询也有 0.03 左右），不设下限的话
+                结果列表尾部永远挂着一堆不相关内容。
+
         Returns:
             List[SearchResult]: 搜索结果列表
         """
@@ -219,6 +223,8 @@ class FAISSIndexManager:
         
         for score, faiss_id in zip(distances[0], indices[0]):
             if faiss_id == -1:
+                continue
+            if float(score) < min_similarity:
                 continue
             summary_id = mapping.get(faiss_id)
             if summary_id is not None:

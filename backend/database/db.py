@@ -117,6 +117,69 @@ class DatabaseManager:
             connection.exec_driver_sql("PRAGMA foreign_keys=ON")
 
     @staticmethod
+    def _migrate_create_fts_index():
+        """建立 summaries 的全文索引（FTS5 + trigram）并用触发器保持同步。
+
+        用 trigram 而不是默认的 unicode61：unicode61 按空白/标点切词，中文
+        整句会变成一个 token，等于搜不了。trigram 切成 3 字符滑动窗口，中文
+        和子串（错拼、词的一部分）都能匹配，代价是索引更大、且查询短于 3
+        个字符时无法命中（调用方需回退到纯向量检索）。
+
+        rowid 直接对齐 summaries.id，查询结果无需再做一次映射。
+        """
+        engine = DatabaseManager._engine
+        if engine is None:
+            return
+
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS summaries_fts
+                USING fts5(content, tokenize='trigram')
+                """
+            )
+
+            # 摘要由后台任务写入，靠应用层同步迟早会漏；交给触发器兜住
+            connection.exec_driver_sql(
+                """
+                CREATE TRIGGER IF NOT EXISTS summaries_fts_ai AFTER INSERT ON summaries BEGIN
+                    INSERT INTO summaries_fts(rowid, content) VALUES (new.id, new.content);
+                END
+                """
+            )
+            connection.exec_driver_sql(
+                """
+                CREATE TRIGGER IF NOT EXISTS summaries_fts_ad AFTER DELETE ON summaries BEGIN
+                    DELETE FROM summaries_fts WHERE rowid = old.id;
+                END
+                """
+            )
+            connection.exec_driver_sql(
+                """
+                CREATE TRIGGER IF NOT EXISTS summaries_fts_au AFTER UPDATE ON summaries BEGIN
+                    DELETE FROM summaries_fts WHERE rowid = old.id;
+                    INSERT INTO summaries_fts(rowid, content) VALUES (new.id, new.content);
+                END
+                """
+            )
+
+            # 回填历史数据（触发器只管建表之后的写入）
+            missing = connection.exec_driver_sql(
+                """
+                SELECT count(*) FROM summaries
+                WHERE id NOT IN (SELECT rowid FROM summaries_fts)
+                """
+            ).scalar()
+            if missing:
+                connection.exec_driver_sql(
+                    """
+                    INSERT INTO summaries_fts(rowid, content)
+                    SELECT id, content FROM summaries
+                    WHERE id NOT IN (SELECT rowid FROM summaries_fts)
+                    """
+                )
+
+    @staticmethod
     def get_db() -> DBSession:
         if DatabaseManager._SessionLocal is None:
             DatabaseManager._init_db()
@@ -138,6 +201,7 @@ class DatabaseManager:
             Base.metadata.create_all(bind=DatabaseManager._engine)
             DatabaseManager._migrate_add_session_name_notes()
             DatabaseManager._migrate_remove_redundant_project_columns()
+            DatabaseManager._migrate_create_fts_index()
 
     # ── Project ──────────────────────────────────────────────────────────────
 

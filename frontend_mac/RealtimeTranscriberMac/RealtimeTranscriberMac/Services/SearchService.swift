@@ -11,12 +11,13 @@ private struct EmptyBody: Encodable {}
 final class SearchService {
     private let api = APIClient()
 
-    func search(projectId: Int, query: String, topK: Int) async throws -> SearchResponse {
+    func search(projectId: Int, query: String, topK: Int, mode: String = "hybrid") async throws -> SearchResponse {
         try await api.get(
             "api/search/projects/\(projectId)",
             queryItems: [
                 URLQueryItem(name: "query", value: query),
                 URLQueryItem(name: "top_k", value: String(topK)),
+                URLQueryItem(name: "mode", value: mode),
             ]
         )
     }
