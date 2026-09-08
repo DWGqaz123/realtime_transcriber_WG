@@ -22,6 +22,9 @@ struct SettingsView: View {
         return String(storedValue > 0 ? storedValue : 30)
     }()
     @State private var transcriptionLanguage: String = UserDefaults.standard.string(forKey: "transcription_language") ?? "en"
+    @State private var secondaryLanguages: Set<String> = Set(
+        UserDefaults.standard.stringArray(forKey: "secondary_languages") ?? []
+    )
     @State private var showSaveSuccess = false
     @State private var validationMessage: String?
 
@@ -118,6 +121,33 @@ struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
+                Text("Secondary Languages")
+                    .font(.headline)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 2
+                ) {
+                    ForEach(languageOptions.filter { !$0.code.isEmpty && $0.code != transcriptionLanguage }, id: \.code) { option in
+                        Toggle(option.label, isOn: Binding(
+                            get: { secondaryLanguages.contains(option.code) },
+                            set: { isOn in
+                                if isOn { secondaryLanguages.insert(option.code) }
+                                else { secondaryLanguages.remove(option.code) }
+                            }
+                        ))
+                        .toggleStyle(.checkbox)
+                    }
+                }
+                .frame(maxWidth: 500, alignment: .leading)
+
+                Text("Extra languages allowed to appear in the audio — useful when you mix languages in one sentence. Leave all unchecked if you speak only the language above.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Auto Summary Interval")
                     .font(.headline)
 
@@ -189,6 +219,9 @@ struct SettingsView: View {
         UserDefaults.standard.set(port, forKey: "backend_port")
         UserDefaults.standard.set(summaryInterval, forKey: "summary_interval_seconds")
         UserDefaults.standard.set(transcriptionLanguage, forKey: "transcription_language")
+        // 主语言不该同时出现在次要语言里
+        let secondary = secondaryLanguages.filter { $0 != transcriptionLanguage }.sorted()
+        UserDefaults.standard.set(secondary, forKey: "secondary_languages")
         
         // 保存到配置文件
         saveAPIKeysToConfigFile()
@@ -218,12 +251,14 @@ struct SettingsView: View {
 
         do {
             try fileManager.createDirectory(at: appDir, withIntermediateDirectories: true, attributes: nil)
-            let config: [String: String] = [
+            let config: [String: Any] = [
                 "openai_api_key": openaiKey,
                 "elevenlabs_api_key": elevenlabsKey,
                 "transcription_language": transcriptionLanguage,
+                "secondary_languages": secondaryLanguages.filter { $0 != transcriptionLanguage }.sorted(),
             ]
-            try JSONEncoder().encode(config).write(to: configFile, options: .atomic)
+            let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: configFile, options: .atomic)
         } catch {
             // 写入失败时后端将沿用旧配置
         }

@@ -1,7 +1,7 @@
 """Runtime configuration for the backend."""
 
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional
 import os
 import sys
 from pathlib import Path
@@ -51,6 +51,7 @@ def load_api_keys():
     elevenlabs_key_file = ""
     hf_key_file = ""
     language_file = ""
+    secondary_file: list = []
     config_file = get_config_file_path()
 
     if config_file.exists():
@@ -61,6 +62,7 @@ def load_api_keys():
             elevenlabs_key_file = config.get("elevenlabs_api_key", "")
             hf_key_file = config.get("huggingface_api_key", "")
             language_file = config.get("transcription_language", "")
+            secondary_file = config.get("secondary_languages", []) or []
         except Exception as exc:
             log.warning("Failed to load API key config: %s", exc)
 
@@ -68,12 +70,38 @@ def load_api_keys():
     elevenlabs_key = elevenlabs_key_env or elevenlabs_key_file
     hf_key = hf_key_env or hf_key_file
     language = os.getenv("TRANSCRIPTION_LANGUAGE", language_file)
-    return openai_key, elevenlabs_key, hf_key, language
+
+    # 环境变量里用逗号分隔（"zh,ja"），配置文件里是数组。
+    # 注意 ElevenLabs 只接受重复 query 参数，不接受逗号分隔的单个值，
+    # 所以这里统一解析成 list，拼 URL 时靠 urlencode(doseq=True) 展开。
+    secondary_env = os.getenv("SECONDARY_LANGUAGES", "")
+    if secondary_env:
+        secondary = [x.strip() for x in secondary_env.split(",") if x.strip()]
+    else:
+        secondary = [str(x).strip() for x in secondary_file if str(x).strip()]
+
+    return openai_key, elevenlabs_key, hf_key, language, secondary
 
 
 # 加载配置
-OPENAI_API_KEY, ELEVENLABS_API_KEY, HUGGINGFACE_API_KEY, TRANSCRIPTION_LANGUAGE = load_api_keys()
-log.info("Transcription language: %s", TRANSCRIPTION_LANGUAGE or "auto-detect")
+(
+    OPENAI_API_KEY,
+    ELEVENLABS_API_KEY,
+    HUGGINGFACE_API_KEY,
+    TRANSCRIPTION_LANGUAGE,
+    SECONDARY_LANGUAGES,
+) = load_api_keys()
+
+# scribe_v2_realtime_turbo 自 2026-07 起可用，延迟更低；
+# 设 STT_MODEL_ID=scribe_v2_realtime 可回退。
+STT_MODEL_ID: str = os.getenv("STT_MODEL_ID", "scribe_v2_realtime_turbo")
+
+log.info(
+    "Transcription language: %s (secondary: %s), STT model: %s",
+    TRANSCRIPTION_LANGUAGE or "auto-detect",
+    ", ".join(SECONDARY_LANGUAGES) if SECONDARY_LANGUAGES else "none",
+    STT_MODEL_ID,
+)
 
 @dataclass
 class ModeConfig:
@@ -93,8 +121,10 @@ class ModeConfig:
     audio_format: str = "pcm_16000"
     sample_rate: int = 16000
     language_code: Optional[str] = None
+    # 额外允许出现的语言（中英混说场景）。ElevenLabs 要求重复 query 参数。
+    secondary_languages: List[str] = field(default_factory=list)
     timestamps_granularity: str = "word"
-    model_id: str = "scribe_v2_realtime"
+    model_id: str = STT_MODEL_ID
 
 
 class TranscriptionConfig:
@@ -107,6 +137,7 @@ class TranscriptionConfig:
         commit_strategy="manual",
         commit_interval=35.0,
         language_code=_lang,
+        secondary_languages=list(SECONDARY_LANGUAGES),
         vad_silence_threshold_secs=None,
         vad_threshold=None,
         min_speech_duration_ms=None,
@@ -117,6 +148,7 @@ class TranscriptionConfig:
         commit_strategy="vad",
         commit_interval=None,
         language_code=_lang,
+        secondary_languages=list(SECONDARY_LANGUAGES),
         vad_silence_threshold_secs=0.5,
         vad_threshold=0.4,
         min_speech_duration_ms=300,

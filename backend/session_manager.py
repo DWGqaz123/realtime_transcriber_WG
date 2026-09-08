@@ -225,6 +225,7 @@ class SessionManager:
             audio_format=mc.audio_format,
             sample_rate=mc.sample_rate,
             language_code=mc.language_code,
+            secondary_languages=list(mc.secondary_languages),
             timestamps_granularity=mc.timestamps_granularity,
             model_id=mc.model_id,
             mode=mode,

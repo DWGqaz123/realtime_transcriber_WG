@@ -4,8 +4,8 @@ import os
 import base64
 import json
 import asyncio
-from dataclasses import dataclass
-from typing import Callable, Optional, Any
+from dataclasses import dataclass, field
+from typing import Callable, List, Optional, Any
 from urllib.parse import urlencode
 import httpx
 import websockets
@@ -34,9 +34,12 @@ class ElevenLabsConfig:
     
     # App-level mode (for logging/reference)
     mode: str
-    
+
     # Commit strategy
     commit_strategy: str
+
+    # 额外允许出现的语言（中英混说）。有默认值，必须排在所有必填字段之后
+    secondary_languages: List[str] = field(default_factory=list)
     
     # VAD settings (used when commit_strategy = "vad")
     vad_silence_threshold_secs: Optional[float] = None
@@ -154,6 +157,13 @@ class ElevenLabsRealtimeClient:
         if self.config.language_code:
             params["language_code"] = self.config.language_code
 
+        # 中英混说等场景：额外允许的语言。
+        # 必须是重复的 query 参数（?secondary_languages=zh&secondary_languages=ja），
+        # 逗号分隔会被服务端拒绝："Invalid language code received: 'zh,ja'"。
+        # 靠下面 urlencode(..., doseq=True) 把 list 展开成重复参数。
+        if self.config.secondary_languages:
+            params["secondary_languages"] = list(self.config.secondary_languages)
+
         if self.config.timestamps_granularity == "word":
             params["include_timestamps"] = "true"
 
@@ -168,7 +178,7 @@ class ElevenLabsRealtimeClient:
             if self.config.min_silence_duration_ms is not None:
                 params["min_silence_duration_ms"] = str(self.config.min_silence_duration_ms)
 
-        url = f"{base_url}?{urlencode(params)}"
+        url = f"{base_url}?{urlencode(params, doseq=True)}"
 
         # 3) Connect to WebSocket
         try:

@@ -122,6 +122,12 @@ class BackendManager: ObservableObject {
             environment["TRANSCRIPTION_LANGUAGE"] = language
         }
 
+        // 后端按逗号分隔解析，再展开成重复的 query 参数发给 ElevenLabs
+        let secondary = UserDefaults.standard.stringArray(forKey: "secondary_languages") ?? []
+        if !secondary.isEmpty {
+            environment["SECONDARY_LANGUAGES"] = secondary.joined(separator: ",")
+        }
+
         let summaryInterval = UserDefaults.standard.integer(forKey: "summary_interval_seconds")
         if summaryInterval > 0 {
             environment["SUMMARY_INTERVAL_SECONDS"] = String(summaryInterval)
