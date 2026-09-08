@@ -176,7 +176,10 @@ class SummaryConfig:
     def get_api_key() -> str:
         return OPENAI_API_KEY
 
-    MODEL: str = "gpt-4-turbo"
+    MODEL: str = os.getenv("SUMMARY_MODEL", "gpt-5.6-luna")
+
+    # 仅对 gpt-4 / gpt-3.5 这代模型生效。gpt-5.x / gpt-6 / o 系列只接受
+    # temperature 的默认值，传 0.3 会被拒（见 SummaryService._build_payload）。
     TEMPERATURE: float = 0.3
     MAX_TOKENS: int = 1024
     API_URL: str = "https://api.openai.com/v1/chat/completions"

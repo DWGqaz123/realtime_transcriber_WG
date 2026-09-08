@@ -25,6 +25,36 @@ class SummaryService:
         self._client = httpx.AsyncClient(timeout=30.0)
 
     
+    @staticmethod
+    def _is_legacy_model(model: str) -> bool:
+        """gpt-4 / gpt-3.5 用 max_tokens 且接受任意 temperature。
+
+        gpt-5.x / gpt-6 / o 系列改用 max_completion_tokens，并且只接受
+        temperature 的默认值——传旧参数会直接 400，所以这里按模型分流。
+        """
+        return model.startswith(("gpt-4", "gpt-3.5"))
+
+    def _build_payload(self, prompt: str) -> dict:
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a professional note-taking assistant, skilled at extracting key knowledge points from lectures."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+        }
+        if self._is_legacy_model(self.model):
+            payload["max_tokens"] = self.max_tokens
+            payload["temperature"] = self.temperature
+        else:
+            payload["max_completion_tokens"] = self.max_tokens
+        return payload
+
     async def generate_summary(
         self,
         buffer_text: str,
@@ -46,7 +76,8 @@ class SummaryService:
         try:
             # 构建 prompt
             prompt = self._build_prompt(buffer_text, context)
-            
+            payload = self._build_payload(prompt)
+
             
             # 调用 API（带重试）
             max_retries = 3
@@ -60,21 +91,7 @@ class SummaryService:
                             "Authorization": f"Bearer {self._api_key}",
                             "Content-Type": "application/json",
                         },
-                        json={
-                            "model": self.model,
-                            "messages": [
-                                {
-                                    "role": "system",
-                                    "content": "You are a professional note-taking assistant, skilled at extracting key knowledge points from lectures."
-                                },
-                                {
-                                    "role": "user",
-                                    "content": prompt
-                                }
-                            ],
-                            "max_tokens": self.max_tokens,
-                            "temperature": self.temperature
-                        }
+                        json=payload
                     )
                     log.info("API latency: %.2fs (attempt %d)", time.perf_counter() - t0, attempt + 1)
                     break
