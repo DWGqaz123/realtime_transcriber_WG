@@ -6,6 +6,9 @@ from database.models import Base, Project, Session, Summary, Embedding
 from typing import Optional, List
 from datetime import datetime
 from pathlib import Path
+import logging
+
+log = logging.getLogger("transcriber.db")
 
 
 class DatabaseManager:
@@ -263,6 +266,13 @@ class DatabaseManager:
             if project:
                 db.delete(project)
                 db.commit()
+                # FAISS 索引不在数据库里，级联删不到它。留着的话磁盘上会堆积
+                # 孤儿索引，全局检索遍历时还会搜出已删除项目的内容。
+                try:
+                    from faiss_manager import get_faiss_manager
+                    get_faiss_manager().reset_index(project_id)
+                except Exception as exc:
+                    log.warning("Failed to drop FAISS index for project %d: %s", project_id, exc)
                 return True
             return False
         finally:

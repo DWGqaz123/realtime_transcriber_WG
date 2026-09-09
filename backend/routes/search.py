@@ -13,7 +13,7 @@ from faiss_manager import get_faiss_manager
 from indexing_service import get_indexing_service
 from hybrid_search import fuse, keyword_search
 from database.db import DatabaseManager
-from database.models import Summary, Session as DBSession, Embedding
+from database.models import Summary, Session as DBSession, Embedding, Project
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -38,6 +38,8 @@ class SearchResult(BaseModel):
     score: float = 0.0          # RRF 融合分，决定排序
     bm25: Optional[float] = None
     sources: List[str] = []     # semantic / keyword，标明这条是哪一路捞到的
+    project_id: int = 0
+    project_name: str = ""
 
     class Config:
         from_attributes = True
@@ -55,6 +57,118 @@ class SearchResponse(BaseModel):
 
 # ==================== API 端点 ====================
 
+async def _run_search(
+    query: str,
+    top_k: int,
+    mode: str,
+    min_similarity: float,
+    project_id: Optional[int] = None,
+) -> SearchResponse:
+    """检索实现。project_id 为 None 时跨全部项目。
+
+    两路召回后用 RRF 融合：稠密向量负责同义改写与语义相近，BM25 负责
+    精确术语、错拼和缩写。mode 可以强制走单路，用于对比或排查。
+    """
+    # 融合前每路都要多召回一些，否则排在两路各自 top_k 边界外、
+    # 但综合排名靠前的条目会被提前丢掉
+    recall_k = min(max(top_k * 3, 20), 100)
+
+    vector_hits = []
+    keyword_hits = []
+
+    db = DatabaseManager.get_db()
+    try:
+        if mode in ("hybrid", "semantic"):
+            embedding_service = get_embedding_service()
+            query_embedding = await asyncio.to_thread(embedding_service.embed_text, query)
+            faiss_manager = get_faiss_manager()
+
+            if project_id is None:
+                # 按数据库里真实存在的项目遍历。磁盘上可能残留已删除项目的
+                # 索引文件，照文件遍历会搜出幽灵数据。
+                project_ids = [row[0] for row in db.query(Project.id).all()]
+                faiss_results = faiss_manager.search_many(
+                    project_ids=project_ids,
+                    query_embedding=query_embedding,
+                    top_k=recall_k,
+                    min_similarity=min_similarity,
+                )
+            else:
+                faiss_results = faiss_manager.search(
+                    project_id=project_id,
+                    query_embedding=query_embedding,
+                    top_k=recall_k,
+                    min_similarity=min_similarity,
+                )
+            vector_hits = [(r.summary_id, r.similarity) for r in faiss_results]
+
+        if mode in ("hybrid", "keyword"):
+            keyword_hits = await asyncio.to_thread(
+                keyword_search, db, project_id, query, recall_k
+            )
+
+        fused = fuse(vector_hits, keyword_hits, top_k=top_k)
+
+        if not fused:
+            return SearchResponse(
+                query=query, total=0, results=[], mode=mode,
+                semantic_hits=len(vector_hits), keyword_hits=len(keyword_hits),
+            )
+
+        summary_ids = [h.summary_id for h in fused]
+        rows = (
+            db.query(Summary, DBSession.mode, DBSession.project_id, Project.name)
+            .join(DBSession, DBSession.id == Summary.session_id)
+            .join(Project, Project.id == DBSession.project_id)
+            .filter(Summary.id.in_(summary_ids))
+            .all()
+        )
+        by_id = {r[0].id: r for r in rows}
+
+        results = []
+        for hit in fused:
+            row = by_id.get(hit.summary_id)
+            if row is None:
+                continue
+            summary, session_mode, proj_id, proj_name = row
+            results.append(SearchResult(
+                summary_id=summary.id,
+                content=summary.content,
+                similarity=hit.similarity if hit.similarity is not None else 0.0,
+                session_id=summary.session_id,
+                session_mode=session_mode,
+                created_at=summary.created_at.isoformat() if summary.created_at else "",
+                score=hit.score,
+                bm25=hit.bm25,
+                sources=hit.sources,
+                project_id=proj_id,
+                project_name=proj_name,
+            ))
+    finally:
+        db.close()
+
+    return SearchResponse(
+        query=query, total=len(results), results=results, mode=mode,
+        semantic_hits=len(vector_hits), keyword_hits=len(keyword_hits),
+    )
+
+
+@router.get("/all", response_model=SearchResponse)
+async def search_all_projects(
+    query: str = Query(..., min_length=1, description="搜索查询"),
+    top_k: int = Query(10, ge=1, le=50, description="返回结果数量"),
+    mode: str = Query("hybrid", pattern="^(hybrid|semantic|keyword)$", description="检索模式"),
+    min_similarity: float = Query(0.15, ge=0.0, le=1.0, description="向量路的相似度下限"),
+):
+    """跨全部项目检索——记忆不按项目分区，这是默认入口。"""
+    try:
+        return await _run_search(query, top_k, mode, min_similarity, project_id=None)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
 @router.get("/projects/{project_id}", response_model=SearchResponse)
 async def search_in_project(
     project_id: int,
@@ -63,94 +177,38 @@ async def search_in_project(
     mode: str = Query("hybrid", pattern="^(hybrid|semantic|keyword)$", description="检索模式"),
     min_similarity: float = Query(0.15, ge=0.0, le=1.0, description="向量路的相似度下限"),
 ):
-    """在项目中检索摘要。
-
-    默认走混合检索：稠密向量负责同义改写与语义相近，BM25 负责精确术语、
-    错拼和缩写，两路结果用 RRF 按名次融合。mode 可以强制走单路，用于
-    对比或排查。
-    """
+    """限定在单个项目内检索。"""
     try:
         require_project(project_id)
-
-        # 融合前每路都要多召回一些，否则排在两路各自 top_k 边界外、
-        # 但综合排名靠前的条目会被提前丢掉
-        recall_k = min(max(top_k * 3, 20), 100)
-
-        vector_hits = []
-        keyword_hits = []
-
-        db = DatabaseManager.get_db()
-        try:
-            if mode in ("hybrid", "semantic"):
-                embedding_service = get_embedding_service()
-                query_embedding = await asyncio.to_thread(embedding_service.embed_text, query)
-                faiss_manager = get_faiss_manager()
-                vector_hits = [
-                    (r.summary_id, r.similarity)
-                    for r in faiss_manager.search(
-                        project_id=project_id,
-                        query_embedding=query_embedding,
-                        top_k=recall_k,
-                        min_similarity=min_similarity,
-                    )
-                ]
-
-            if mode in ("hybrid", "keyword"):
-                keyword_hits = await asyncio.to_thread(
-                    keyword_search, db, project_id, query, recall_k
-                )
-
-            fused = fuse(vector_hits, keyword_hits, top_k=top_k)
-
-            if not fused:
-                return SearchResponse(
-                    query=query, total=0, results=[], mode=mode,
-                    semantic_hits=len(vector_hits), keyword_hits=len(keyword_hits),
-                )
-
-            summary_ids = [h.summary_id for h in fused]
-            summary_rows = db.query(Summary, DBSession.mode).join(
-                DBSession, DBSession.id == Summary.session_id
-            ).filter(Summary.id.in_(summary_ids)).all()
-
-            summaries_by_id = {
-                summary.id: (summary, session_mode)
-                for summary, session_mode in summary_rows
-            }
-
-            results = []
-            for hit in fused:
-                row = summaries_by_id.get(hit.summary_id)
-                if row is None:
-                    continue
-                summary, session_mode = row
-                results.append(SearchResult(
-                    summary_id=summary.id,
-                    content=summary.content,
-                    similarity=hit.similarity if hit.similarity is not None else 0.0,
-                    session_id=summary.session_id,
-                    session_mode=session_mode,
-                    created_at=summary.created_at.isoformat() if summary.created_at else "",
-                    score=hit.score,
-                    bm25=hit.bm25,
-                    sources=hit.sources,
-                ))
-        finally:
-            db.close()
-
-        return SearchResponse(
-            query=query,
-            total=len(results),
-            results=results,
-            mode=mode,
-            semantic_hits=len(vector_hits),
-            keyword_hits=len(keyword_hits),
-        )
-
+        return await _run_search(query, top_k, mode, min_similarity, project_id=project_id)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+@router.post("/reindex-all")
+async def reindex_all_projects():
+    """重建全部项目的向量索引（换 embedding 模型后使用）。"""
+    service = get_indexing_service()
+    db = DatabaseManager.get_db()
+    try:
+        project_ids = [row[0] for row in db.query(Project.id).all()]
+    finally:
+        db.close()
+
+    total = 0
+    failed = []
+    for pid in project_ids:
+        result = await service.reindex_project(pid)
+        if result.get("success"):
+            total += result.get("indexed", 0)
+        else:
+            failed.append({"project_id": pid, "error": result.get("error")})
+
+    if failed and total == 0:
+        raise HTTPException(status_code=500, detail=f"Reindex failed: {failed}")
+    return {"success": True, "indexed": total, "projects": len(project_ids), "failed": failed}
 
 
 @router.post("/projects/{project_id}/reindex")

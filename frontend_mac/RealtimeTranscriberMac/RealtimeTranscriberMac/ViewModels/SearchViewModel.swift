@@ -24,6 +24,8 @@ struct SearchResult: Identifiable, Codable {
     let score: Double?
     let bm25: Double?
     let sources: [String]?
+    let project_id: Int
+    let project_name: String
 
     var id: Int { summary_id }
 
@@ -93,6 +95,53 @@ class SearchViewModel: ObservableObject {
         }
     }
     
+    func search(topK: Int = 10) async {
+        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
+            errorMessage = "Please enter a search query"
+            return
+        }
+
+        isSearching = true
+        errorMessage = nil
+        hasSearched = true
+        results = []
+
+        do {
+            let response = try await searchService.searchAll(
+                query: searchQuery.trimmingCharacters(in: .whitespaces),
+                topK: topK,
+                mode: mode.rawValue
+            )
+            self.results = response.results
+            self.lastSemanticHits = response.semantic_hits ?? 0
+            self.lastKeywordHits = response.keyword_hits ?? 0
+        } catch {
+            errorMessage = "Search failed: \(error.localizedDescription)"
+        }
+
+        isSearching = false
+    }
+
+    /// 重建全部项目的向量索引
+    func reindexAll() async {
+        isReindexing = true
+        errorMessage = nil
+        statusMessage = "Rebuilding index..."
+
+        do {
+            let response = try await searchService.reindexAll()
+            statusMessage = "Indexed \(response.indexed) summaries"
+            isReindexing = false
+            if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                await search()
+            }
+        } catch {
+            statusMessage = nil
+            errorMessage = "Reindex failed: \(error.localizedDescription)"
+            isReindexing = false
+        }
+    }
+
     func search(in projectId: Int, topK: Int = 10) async {
         guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
             errorMessage = "Please enter a search query"

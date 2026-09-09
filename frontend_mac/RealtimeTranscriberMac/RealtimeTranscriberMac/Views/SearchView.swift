@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct SearchView: View {
-    let project: Project
-    let onSelectSession: (Int) -> Void
+    // 跨全部项目检索，因此不绑定 project；跳转时从结果里取 projectId
+    let onSelectSession: (Int, Int) -> Void
     @StateObject private var viewModel = SearchViewModel()
     @Environment(\.dismiss) var dismiss
     
@@ -39,10 +39,10 @@ struct SearchView: View {
     private var headerView: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Search in Project")
+                Text("Search")
                     .font(.headline)
-                
-                Text(project.name)
+
+                Text("All projects")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -70,9 +70,7 @@ struct SearchView: View {
             TextField("Search summaries...", text: $viewModel.searchQuery)
                 .textFieldStyle(.plain)
                 .onSubmit {
-                    Task {
-                        await viewModel.search(in: project.id)
-                    }
+                    Task { await viewModel.search() }
                 }
             
             if !viewModel.searchQuery.isEmpty {
@@ -86,9 +84,7 @@ struct SearchView: View {
             }
             
             Button(action: {
-                Task {
-                    await viewModel.search(in: project.id)
-                }
+                Task { await viewModel.search() }
             }) {
                 Text("Search")
                     .frame(minWidth: 80)
@@ -110,7 +106,7 @@ struct SearchView: View {
             .frame(width: 260)
             .onChange(of: viewModel.mode) { _ in
                 guard !viewModel.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                Task { await viewModel.search(in: project.id) }
+                Task { await viewModel.search() }
             }
 
             if viewModel.hasSearched {
@@ -149,7 +145,7 @@ struct SearchView: View {
                         SearchResultCard(
                             result: result,
                             onTap: {  // 🔧 新增回调
-                                onSelectSession(result.session_id)
+                                onSelectSession(result.project_id, result.session_id)
                                 dismiss()  // 关闭搜索界面
                             }
                         )
@@ -207,14 +203,14 @@ struct SearchView: View {
                 .frame(maxWidth: 240)
 
             VStack(spacing: 6) {
-                Text("Summaries recorded before an embedding-model change are not searchable until the index is rebuilt.")
+                Text("Summaries recorded before an embedding-model change are not searchable until the index is rebuilt. This rebuilds every project.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
 
                 Button {
-                    Task { await viewModel.reindex(projectId: project.id) }
+                    Task { await viewModel.reindexAll() }
                 } label: {
                     if viewModel.isReindexing {
                         HStack(spacing: 6) {
@@ -262,7 +258,7 @@ struct SearchView: View {
                     Button(action: {
                         viewModel.searchQuery = example
                         Task {
-                            await viewModel.search(in: project.id)
+                            await viewModel.search()
                         }
                     }) {
                         HStack {
@@ -334,6 +330,16 @@ struct SearchResultCard: View {
                     
                     // Metadata
                     HStack(spacing: 8) {
+                        if !result.project_name.isEmpty {
+                            Text(result.project_name)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.12))
+                                .cornerRadius(4)
+                        }
+
                         Text(result.formattedDate)
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -384,16 +390,5 @@ struct SearchResultCard: View {
 }
 
 #Preview {
-    SearchView(
-        project: Project(
-            id: 1,
-            name: "Test Project",
-            description: "Test description",
-            createdAt: Date(),
-            updatedAt: Date(),
-            sessionCount: 0
-        ),
-        onSelectSession: { sessionId in
-        }
-    )
+    SearchView(onSelectSession: { _, _ in })
 }

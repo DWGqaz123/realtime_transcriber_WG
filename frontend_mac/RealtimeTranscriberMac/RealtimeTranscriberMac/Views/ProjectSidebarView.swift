@@ -158,24 +158,20 @@ struct ProjectSidebarView: View {
             }
         }
         .sheet(isPresented: $showSearchSheet) {
-            if let project = viewModel.selectedProject {
-                SearchView(
-                    project: project,
-                    onSelectSession: { sessionId in  // 🔧 新增回调
-                        
-                        // 关闭搜索界面
-                        showSearchSheet = false
-                        
-                        // 跳转到对应的 session
-                        Task {
-                            await viewModel.selectSessionById(
-                                projectId: project.id,
-                                sessionId: sessionId
-                            )
-                        }
+            SearchView(
+                onSelectSession: { projectId, sessionId in
+                    // 关闭搜索界面
+                    showSearchSheet = false
+
+                    // 跳转到对应的 session（可能在另一个项目里）
+                    Task {
+                        await viewModel.selectSessionById(
+                            projectId: projectId,
+                            sessionId: sessionId
+                        )
                     }
-                )
-            }
+                }
+            )
         }
         .alert("Delete Project", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {

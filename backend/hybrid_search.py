@@ -56,7 +56,7 @@ def build_fts_query(query: str) -> Optional[str]:
 
 def keyword_search(
     db,
-    project_id: int,
+    project_id: Optional[int],
     query: str,
     limit: int = 50,
 ) -> List[Tuple[int, float]]:
@@ -70,10 +70,15 @@ def keyword_search(
         return []
 
     try:
-        rows = db.execute(
-            _KEYWORD_SQL,
-            {"match": match_expr, "project_id": project_id, "limit": limit},
-        ).fetchall()
+        if project_id is None:
+            rows = db.execute(
+                _KEYWORD_SQL_ALL, {"match": match_expr, "limit": limit}
+            ).fetchall()
+        else:
+            rows = db.execute(
+                _KEYWORD_SQL,
+                {"match": match_expr, "project_id": project_id, "limit": limit},
+            ).fetchall()
     except Exception as exc:
         # FTS 表缺失或表达式非法都不该让整个搜索挂掉，降级成纯向量
         log.warning("BM25 search failed (%s), falling back to vector only", exc)
@@ -142,11 +147,22 @@ def fuse(
 
 # 放在模块末尾，避免上面的函数定义被一大段 SQL 打断
 _KEYWORD_SQL = None
+_KEYWORD_SQL_ALL = None
 
 
 def _init_sql():
-    global _KEYWORD_SQL
+    global _KEYWORD_SQL, _KEYWORD_SQL_ALL
     from sqlalchemy import text
+    _KEYWORD_SQL_ALL = text(
+        """
+        SELECT f.rowid AS summary_id, bm25(summaries_fts) AS score
+        FROM summaries_fts f
+        JOIN summaries s ON s.id = f.rowid
+        WHERE summaries_fts MATCH :match
+        ORDER BY score
+        LIMIT :limit
+        """
+    )
     _KEYWORD_SQL = text(
         """
         SELECT f.rowid AS summary_id, bm25(summaries_fts) AS score

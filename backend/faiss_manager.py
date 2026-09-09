@@ -233,6 +233,35 @@ class FAISSIndexManager:
         
         return results
     
+    def search_many(
+        self,
+        project_ids: List[int],
+        query_embedding: np.ndarray,
+        top_k: int = 10,
+        min_similarity: float = 0.0,
+    ) -> List[SearchResult]:
+        """跨多个项目检索后合并排序。
+
+        索引是按项目分片的（每个项目一个 IndexFlatIP），所以全局检索只能
+        逐个搜再合并。summary_id 是数据库主键、全局唯一，合并不会冲突。
+        项目数是个位数、每个索引也只有几千条，逐个暴力搜的开销可以忽略。
+
+        调用方必须传入数据库中真实存在的 project_id：磁盘上可能残留已删除
+        项目的索引文件，照着文件遍历会搜出幽灵数据。
+        """
+        merged: List[SearchResult] = []
+        for project_id in project_ids:
+            merged.extend(
+                self.search(
+                    project_id=project_id,
+                    query_embedding=query_embedding,
+                    top_k=top_k,
+                    min_similarity=min_similarity,
+                )
+            )
+        merged.sort(key=lambda r: r.similarity, reverse=True)
+        return merged[:top_k]
+
     def reset_index(self, project_id: int) -> None:
         """丢弃项目的索引与映射（内存 + 磁盘），供重新索引使用。"""
         self.indices.pop(project_id, None)
