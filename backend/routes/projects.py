@@ -110,6 +110,7 @@ class SummaryResponse(BaseModel):
     duration_seconds: int
     start_sentence_idx: int
     end_sentence_idx: int
+    is_final: bool = False
 
     class Config:
         from_attributes = True
@@ -197,6 +198,7 @@ async def get_session_detail(project_id: int, session_id: int):
             duration_seconds=s.duration_seconds,
             start_sentence_idx=s.start_sentence_idx,
             end_sentence_idx=s.end_sentence_idx,
+            is_final=bool(s.is_final),
         )
         for s in summaries
     ]

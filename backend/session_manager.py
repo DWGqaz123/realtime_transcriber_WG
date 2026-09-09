@@ -312,10 +312,31 @@ class SessionManager:
         if project_id is None:
             log.warning("No project_id for session %s", session.id)
             return
-        if session.db_session_id is not None and not session.is_saved:
-            log.info("Reusing existing DB session: %s", session.db_session_id)
-            # Keep summary_count / sentence cursor / start_time: the recording
-            # continues into the same DB row.
+        if session.db_session_id is not None:
+            # 沿用同一条记录：Stop 只是暂停，继续录音应该接着写下去。
+            # is_saved 表示"已落库"而非"会话结束"——真正的结束是前端
+            # New Session，它会断开 WebSocket，下次连接是全新 LiveSession。
+            log.info("Resuming DB session: %s", session.db_session_id)
+
+            # 旧的终版摘要只覆盖前半段，Stop 时会生成新的完整版把它包含进去。
+            # 留着就是内容互相包含的冗余，这里先清掉。
+            # 注意：若它已被索引，FAISS 里会留下悬空向量——检索侧已有
+            # "查不到内容就跳过" 的保护，重建索引可彻底清理。
+            try:
+                removed = DatabaseManager.delete_final_summaries(session.db_session_id)
+                if removed:
+                    session.summary_count = max(0, session.summary_count - len(removed))
+                    log.info("Dropped %d stale final summary/summaries: %s", len(removed), removed)
+                    # SQLite 会复用被删的主键，新摘要拿到同一个 id 后，
+                    # 索引里的旧向量就会指向新内容。必须同步摘掉映射。
+                    self.indexing_service.faiss_manager.remove_mappings(project_id, removed)
+            except Exception as exc:
+                log.warning("Failed to drop stale final summaries: %s", exc)
+
+            session.is_saved = False
+            # 从继续的这一刻重新计时，暂停期间不计入时长
+            session.start_time = time.time()
+            # 保留 summary_count / 句子游标 / 累计时长
             self._reset_summary_state(session, reset_timeline=False)
             return
 
@@ -478,6 +499,10 @@ class SessionManager:
 
     async def _handle_stop_command(self, session: LiveSession) -> None:
         log.info("Received STOP signal from %s", session.id)
+
+        # 先结算本段录音时长。必须在生成终版摘要之前，否则那次 LLM 调用
+        # 的等待时间（2~5 秒）会被算进录音时长。
+        session.accumulated_duration += time.time() - session.start_time
         full_transcript = "\n".join(session.transcript_parts)
 
         if full_transcript.strip() and len(full_transcript.strip()) > 20 and session.db_session_id:
@@ -491,6 +516,10 @@ class SessionManager:
                 log.error("Failed to generate final summary: %s", exc, exc_info=True)
         else:
             log.debug("No final summary: transcript too short or no db session")
+
+        # 计时归零后再保存：save_session 会加上 (now - start_time)，
+        # 这里已经结算过，不能重复计入
+        session.start_time = time.time()
 
         # Auto-save transcript so it's persisted even if user never clicks Save
         if not session.is_saved:

@@ -215,8 +215,14 @@ final class TranscribeViewModel: ObservableObject {
                     self.showPermissionAlert = true
                     return
                 }
-                //remore all possible remains summary
-                self.summaries.removeAll()
+                if self.fullTranscript.isEmpty {
+                    // 新会话：清空
+                    self.summaries.removeAll()
+                } else {
+                    // 继续录音：保留增量摘要，但移除上一次 Stop 生成的终版摘要
+                    // ——后端会删掉它，Stop 时再生成一条覆盖全文的新终版摘要
+                    self.summaries.removeAll { $0.isFinal }
+                }
                 
                 // 🔧 检查项目 ID
                 guard let projectId = self.currentProjectId else {
@@ -290,7 +296,7 @@ final class TranscribeViewModel: ObservableObject {
         
         isRecording = false
         currentSubtitle = ""  // 清空字幕
-        permissionStatus = "Recording stopped - Ready to save 💾"
+        permissionStatus = "Paused - saved, press Resume to continue 💾"
         
         // 停止倒计时
         stopSummaryCountdown()
@@ -449,6 +455,12 @@ final class TranscribeViewModel: ObservableObject {
         return String(format: "%02d:%02d.%d", minutes, seconds, milliseconds)
     }
     
+    /// 已停止、但本次会话还有内容——此时再次录音是「继续」而不是新开一段。
+    /// 后端会沿用同一条数据库记录（Stop 只是暂停，New Session 才是结束）。
+    var canResume: Bool {
+        !isRecording && !fullTranscript.isEmpty
+    }
+
     var sentenceCount: Int {
         guard !fullTranscript.isEmpty else { return 0 }
         return fullTranscript.components(separatedBy: "\n").filter { !$0.isEmpty }.count

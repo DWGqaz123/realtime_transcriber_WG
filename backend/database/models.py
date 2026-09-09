@@ -61,6 +61,10 @@ class Summary(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     duration_seconds = Column(Integer)
 
+    # 终版摘要：Stop 时对整段转录生成。继续录音后它会被新的终版摘要取代，
+    # 所以需要能识别出来删掉，否则每次 Stop 都留一条内容互相包含的冗余摘要。
+    is_final = Column(Boolean, default=False)
+
     session = relationship("Session", back_populates="summaries")
     embedding = relationship("Embedding", back_populates="summary", uselist=False, cascade="all, delete-orphan")
     is_indexed = Column(Boolean, default=False)

@@ -21,6 +21,9 @@ class LiveSession:
     started_at: datetime
 
     start_time: float = field(default_factory=time.time)
+    # 已完成片段的累计时长。Stop→继续 会产生多个片段，
+    # 中间的暂停时间不应计入
+    accumulated_duration: float = 0.0
 
     # Transcript
     transcript_parts: List[str] = field(default_factory=list)

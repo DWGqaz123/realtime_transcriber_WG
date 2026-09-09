@@ -120,6 +120,18 @@ class DatabaseManager:
             connection.exec_driver_sql("PRAGMA foreign_keys=ON")
 
     @staticmethod
+    def _migrate_add_summary_is_final():
+        """给已存在的 summaries 表补 is_final 列。"""
+        engine = DatabaseManager._engine
+        if engine is None:
+            return
+        with engine.begin() as connection:
+            if not DatabaseManager._table_has_column(connection, "summaries", "is_final"):
+                connection.exec_driver_sql(
+                    "ALTER TABLE summaries ADD COLUMN is_final BOOLEAN DEFAULT 0"
+                )
+
+    @staticmethod
     def _migrate_create_fts_index():
         """建立 summaries 的全文索引（FTS5 + trigram）并用触发器保持同步。
 
@@ -204,6 +216,7 @@ class DatabaseManager:
             Base.metadata.create_all(bind=DatabaseManager._engine)
             DatabaseManager._migrate_add_session_name_notes()
             DatabaseManager._migrate_remove_redundant_project_columns()
+            DatabaseManager._migrate_add_summary_is_final()
             DatabaseManager._migrate_create_fts_index()
 
     # ── Project ──────────────────────────────────────────────────────────────
@@ -375,6 +388,7 @@ class DatabaseManager:
         start_sentence_idx: int,
         end_sentence_idx: int,
         duration_seconds: int = 0,
+        is_final: bool = False,
     ) -> Summary:
         db = DatabaseManager.get_db()
         try:
@@ -385,12 +399,39 @@ class DatabaseManager:
                 start_sentence_idx=start_sentence_idx,
                 end_sentence_idx=end_sentence_idx,
                 duration_seconds=duration_seconds,
+                is_final=is_final,
                 created_at=datetime.utcnow(),
             )
             db.add(summary)
             db.commit()
             db.refresh(summary)
             return summary
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    @staticmethod
+    def delete_final_summaries(session_id: int) -> List[int]:
+        """删掉某个 session 的终版摘要，返回被删的 id。
+
+        继续录音时调用：旧的终版摘要只覆盖前半段，会被 Stop 时生成的新
+        终版摘要完全包含，留着就是冗余。
+        """
+        db = DatabaseManager.get_db()
+        try:
+            rows = (
+                db.query(Summary)
+                .filter(Summary.session_id == session_id, Summary.is_final == True)
+                .all()
+            )
+            deleted = [row.id for row in rows]
+            for row in rows:
+                db.delete(row)
+            if deleted:
+                db.commit()
+            return deleted
         except Exception:
             db.rollback()
             raise

@@ -161,8 +161,12 @@ struct RecordingView: View {
                     }
                 }) {
                     HStack(spacing: 8) {
-                        Image(systemName: viewModel.isRecording ? "stop.circle.fill" : "mic.circle.fill")
-                        Text(viewModel.isRecording ? "Stop" : "Start")
+                        Image(systemName: viewModel.isRecording
+                              ? "stop.circle.fill"
+                              : (viewModel.canResume ? "play.circle.fill" : "mic.circle.fill"))
+                        Text(viewModel.isRecording
+                             ? "Stop"
+                             : (viewModel.canResume ? "Resume" : "Start"))
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)

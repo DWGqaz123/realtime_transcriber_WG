@@ -101,7 +101,11 @@ struct SessionSummary: Identifiable, Codable, Hashable {
     let durationSeconds: Int
     let startSentenceIdx: Int
     let endSentenceIdx: Int
-    
+    let isFinal: Bool?
+
+    /// 终版摘要：Stop 时对整段转录生成
+    var isFinalSummary: Bool { isFinal ?? false }
+
     enum CodingKeys: String, CodingKey {
         case id
         case content
@@ -110,6 +114,7 @@ struct SessionSummary: Identifiable, Codable, Hashable {
         case durationSeconds = "duration_seconds"
         case startSentenceIdx = "start_sentence_idx"
         case endSentenceIdx = "end_sentence_idx"
+        case isFinal = "is_final"
     }
     
     // 🔧 手动实现 Hashable

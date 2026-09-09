@@ -20,7 +20,10 @@ class SessionPersistenceService:
         self._summary_service = summary_service or SummaryService()
 
     def save_session(self, session: Any) -> dict:
-        duration = int(time.time() - session.start_time)
+        # 累计已结算的片段 + 当前片段
+        duration = int(
+            getattr(session, "accumulated_duration", 0.0) + (time.time() - session.start_time)
+        )
         full_transcript = "\n".join(session.transcript_parts)
         sentence_count = len(session.transcript_parts)
         char_count = len(full_transcript)
@@ -77,7 +80,10 @@ class SessionPersistenceService:
             source_text=full_transcript[:1000],
             start_sentence_idx=0,
             end_sentence_idx=len(session.transcript_parts),
-            duration_seconds=int(time.time() - session.start_time),
+            is_final=True,
+            duration_seconds=int(
+                getattr(session, "accumulated_duration", 0.0) + (time.time() - session.start_time)
+            ),
         )
 
         return {

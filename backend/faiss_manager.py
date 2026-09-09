@@ -262,6 +262,28 @@ class FAISSIndexManager:
         merged.sort(key=lambda r: r.similarity, reverse=True)
         return merged[:top_k]
 
+    def remove_mappings(self, project_id: int, summary_ids: List[int]) -> int:
+        """把指向这些 summary 的映射从索引里摘掉，返回摘除条数。
+
+        IndexFlatIP 不支持删除向量，所以向量本身会留在索引里成为悬空数据；
+        但移除映射后检索不会再返回它。这一步是必要的：SQLite 会复用被删除
+        的主键，新摘要拿到同一个 id 后，旧向量就会指向新内容，导致检索时
+        用旧语义匹配却返回新文本。彻底清理需要重建索引。
+        """
+        mapping = self.id_mappings.get(project_id)
+        if not mapping:
+            return 0
+
+        targets = set(summary_ids)
+        stale = [faiss_id for faiss_id, summary_id in mapping.items() if summary_id in targets]
+        for faiss_id in stale:
+            mapping.pop(faiss_id, None)
+
+        if stale:
+            self.save_index(project_id)
+            log.info("Removed %d stale mapping(s) from project %d index", len(stale), project_id)
+        return len(stale)
+
     def reset_index(self, project_id: int) -> None:
         """丢弃项目的索引与映射（内存 + 磁盘），供重新索引使用。"""
         self.indices.pop(project_id, None)
