@@ -312,34 +312,55 @@ class SessionManager:
         if project_id is None:
             log.warning("No project_id for session %s", session.id)
             return
+        if session.db_session_id is not None and not session.is_saved:
+            log.info("Reusing existing DB session: %s", session.db_session_id)
+            # Keep summary_count / sentence cursor / start_time: the recording
+            # continues into the same DB row.
+            self._reset_summary_state(session, reset_timeline=False)
+            return
+
+        # 不在这里建记录：MODE 只表示"准备录音"，用户点开又马上停、或者
+        # 麦克风没收到声音，都会留下一条时长 0、无转录的空壳。改为等第一条
+        # final 转录到达时再建（见 _ensure_database_session）。
+        session.db_session_id = None
+        session.is_saved = False
+        self._reset_summary_state(session)
+        session.transcript_parts.clear()
+        log.debug("DB session deferred until first transcript (project=%d, mode=%s)", project_id, mode)
+
+    def _ensure_database_session(self, session: LiveSession) -> bool:
+        """确保有 DB 记录可写；第一条转录到达时才真正创建。"""
+        if session.db_session_id is not None:
+            return True
+
+        project_id = session.meta.get("project_id")
+        if project_id is None:
+            return False
+
+        mode = session.meta.get("mode", "lecture")
         try:
-            if session.db_session_id is not None and not session.is_saved:
-                log.info("Reusing existing DB session: %s", session.db_session_id)
-                # Keep summary_count / sentence cursor / start_time: the recording
-                # continues into the same DB row.
-                self._reset_summary_state(session, reset_timeline=False)
-                return
             db_session = DatabaseManager.create_session(project_id=project_id, mode=mode)
             session.db_session_id = db_session.id
             session.is_saved = False
-            self._reset_summary_state(session)
-            session.transcript_parts.clear()
             log.info(
-                "Created new DB session: %d (project=%d, mode=%s)",
+                "Created DB session: %d (project=%d, mode=%s)",
                 db_session.id, project_id, mode,
             )
+            return True
         except Exception as exc:
-            log.error("Failed to create/reuse DB session: %s", exc, exc_info=True)
+            log.error("Failed to create DB session: %s", exc, exc_info=True)
+            return False
 
     async def _save_session_to_db(self, session_id: str) -> None:
         session = self.sessions.get(session_id)
         if session is None or session.is_saved:
             return
+        if not session.transcript_parts:
+            # 什么都没录到：既没有 DB 记录也没有内容，这是正常情况而非错误
+            log.debug("Nothing recorded for %s, skipping save", session_id)
+            return
         if session.db_session_id is None:
             await self._send_save_error(session, "No database session")
-            return
-        if not session.transcript_parts:
-            await self._send_save_error(session, "No transcript to save")
             return
         try:
             save_result = self.persistence.save_session(session)
@@ -542,6 +563,8 @@ class SessionManager:
 
         if is_final and text.strip():
             stripped = text.strip()
+            # 真的录到内容了，这时才落 DB 记录
+            self._ensure_database_session(session)
             session.transcript_parts.append(stripped)
             session.ingestion_buffer.append(stripped)
 
