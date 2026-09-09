@@ -6,6 +6,9 @@
 //
 
 import Foundation
+import os
+
+private let log = Logger(subsystem: "com.winstondong.RealtimeTranscriberMac", category: "websocket")
 
 final class TranscriptionClient: NSObject {
     private var webSocketTask: URLSessionWebSocketTask?
@@ -170,11 +173,11 @@ final class TranscriptionClient: NSObject {
             guard let self = self else { return }
             
             if let error = error {
+                log.error("Failed to send text: \(error.localizedDescription, privacy: .public)")
                 self.isConnected = false
                 if self.shouldReconnect {
                     self.reconnect()
                 }
-            } else {
             }
         }
     }
@@ -190,6 +193,7 @@ final class TranscriptionClient: NSObject {
             guard let self = self else { return }
             
             if let error = error {
+                log.error("Failed to send audio: \(error.localizedDescription, privacy: .public)")
                 self.isConnected = false
                 if self.shouldReconnect {
                     self.reconnect()
@@ -226,8 +230,9 @@ final class TranscriptionClient: NSObject {
                 self.startReceiving()
                 
             case .failure(let error):
+                log.error("Receive failed: \(error.localizedDescription, privacy: .public)")
                 self.isConnected = false
-                
+
                 if self.shouldReconnect {
                     self.reconnect()
                 }
@@ -267,8 +272,10 @@ extension TranscriptionClient: URLSessionWebSocketDelegate {
         didCompleteWithError error: Error?
     ) {
         if let error = error {
+            // 端口错配、后端未启动等都会走到这里，此前完全静默
+            log.error("WebSocket task failed: \(error.localizedDescription, privacy: .public)")
             isConnected = false
-            
+
             if shouldReconnect {
                 reconnect()
             }

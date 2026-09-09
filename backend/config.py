@@ -10,27 +10,22 @@ import logging
 
 log = logging.getLogger("transcriber.config")
 
-# 检测是否为 PyInstaller 打包
+# 检测是否为 PyInstaller 打包。BASE_DIR 目前只用于启动日志——数据路径由
+# 各模块自行解析（DatabaseManager、FAISSIndexManager、SessionPersistence
+# 都直接指向 ~/Library/Application Support/RealtimeTranscriber/）。
+#
+# 这里曾经还有 APP_DATA_DIR / DATABASE_PATH / MODELS_DIR / RUNS_DIR 四个常量
+# 和三次 mkdir，但没有任何模块引用它们：models 目录在改用远程 embedding 后
+# 就不存在了，RunLogger 从未被实例化，DATABASE_PATH 指向的 transcriptions.db
+# 也从来没被打开过（真正的库是 transcripts.db）。开发模式下 APP_DATA_DIR
+# 等于 backend/，那次 mkdir 会去"创建" backend/database/ 这个源码目录，
+# 正是它让人误以为那里是数据目录，进而写出了会静默忽略源码的 gitignore 规则。
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys._MEIPASS)
-    APP_DATA_DIR = Path.home() / "Library" / "Application Support" / "RealtimeTranscriber"
     log.info("Running as packaged app, base_dir=%s", BASE_DIR)
 else:
     BASE_DIR = Path(__file__).parent
-    APP_DATA_DIR = BASE_DIR
     log.info("Running in development mode, base_dir=%s", BASE_DIR)
-
-# 创建必要的目录
-APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
-(APP_DATA_DIR / "runs").mkdir(exist_ok=True)
-(APP_DATA_DIR / "database").mkdir(exist_ok=True)
-
-# 配置路径
-MODELS_DIR = BASE_DIR / "models"
-DATABASE_PATH = APP_DATA_DIR / "database" / "transcriptions.db"
-RUNS_DIR = APP_DATA_DIR / "runs"
-
-log.debug("Paths: models=%s, db=%s, runs=%s", MODELS_DIR, DATABASE_PATH, RUNS_DIR)
 
 # ==================== API Keys Configuration ====================
 
@@ -270,42 +265,3 @@ class EmbeddingConfig:
             cls.PROVIDER, cls.MODEL, cls.DIMENSION,
             "ok" if cls.get_api_key() else "MISSING",
         )
-
-# ==================== 日志配置 ====================
-
-class LogConfig:
-    """日志输出控制配置"""
-
-    VERBOSE: bool = True
-    LOG_AUDIO_CHUNKS: bool = False
-    LOG_RUN_EVENTS: bool = False
-    LOG_WEBSOCKET_MESSAGES: bool = False
-    LOG_TRANSCRIPT: bool = True
-    LOG_SUMMARY: bool = True
-    LOG_SESSION: bool = True
-    LOG_DATABASE: bool = True
-    
-    @classmethod
-    def enable_verbose(cls):
-        """启用详细日志（调试模式）"""
-        cls.VERBOSE = True
-        cls.LOG_AUDIO_CHUNKS = True
-        cls.LOG_RUN_EVENTS = True
-        cls.LOG_WEBSOCKET_MESSAGES = True
-        log.info("Verbose logging ENABLED")
-    
-    @classmethod
-    def enable_quiet(cls):
-        """启用安静模式（只记录重要事件）"""
-        cls.VERBOSE = False
-        cls.LOG_AUDIO_CHUNKS = False
-        cls.LOG_RUN_EVENTS = False
-        cls.LOG_WEBSOCKET_MESSAGES = False
-        log.info("Quiet mode ENABLED")
-    
-    @classmethod
-    def print_config(cls):
-        """打印日志配置"""
-        log.info("Log Config: verbose=%s, audio=%s, ws=%s, transcript=%s, summary=%s",
-                 cls.VERBOSE, cls.LOG_AUDIO_CHUNKS, cls.LOG_WEBSOCKET_MESSAGES,
-                 cls.LOG_TRANSCRIPT, cls.LOG_SUMMARY)

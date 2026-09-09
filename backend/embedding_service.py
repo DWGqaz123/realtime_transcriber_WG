@@ -150,10 +150,6 @@ class EmbeddingService:
             )
         return embeddings
 
-    def get_dimension(self) -> int:
-        """获取向量维度"""
-        return self.dimension
-
 
 # 全局单例
 _embedding_service: Optional[EmbeddingService] = None

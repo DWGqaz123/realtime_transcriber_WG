@@ -42,8 +42,7 @@ struct SummaryCardView: View {
                 Spacer()
                 
                 // Metadata（只在非最终摘要或有数据时显示）
-                if let sentenceCount = summary.sentenceCount,
-                   let duration = summary.duration {
+                if let sentenceCount = summary.sentenceCount, summary.duration != nil {
                     HStack(spacing: 8) {
                         Label("\(sentenceCount)", systemImage: "text.quote")
                             .font(.caption2)

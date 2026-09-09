@@ -5,6 +5,9 @@
 //  Created by 董文光 on 2025/11/15.
 import Foundation
 import AVFoundation
+import os
+
+private let log = Logger(subsystem: "com.winstondong.RealtimeTranscriberMac", category: "audio")
 
 final class AudioCaptureService {
     
@@ -174,6 +177,7 @@ final class AudioCaptureService {
         _ = converter.convert(to: convertedBuffer, error: &error, withInputFrom: inputBlock)
         
         if let error = error {
+            log.error("Audio conversion failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }
         
@@ -183,7 +187,7 @@ final class AudioCaptureService {
     /// Convert AVAudioPCMBuffer to Data
     private static func bufferToData(buffer: AVAudioPCMBuffer) -> Data? {
         let audioBufferList = buffer.audioBufferList.pointee
-        var audioBuffer = audioBufferList.mBuffers
+        let audioBuffer = audioBufferList.mBuffers
         
         guard let mData = audioBuffer.mData else {
             return nil

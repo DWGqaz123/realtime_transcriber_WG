@@ -4,6 +4,7 @@ import os
 import base64
 import json
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Any
 from urllib.parse import urlencode
@@ -16,6 +17,8 @@ try:
     CERT_PATH = certifi.where()
 except ImportError:
     CERT_PATH = None
+
+log = logging.getLogger("transcriber.elevenlabs")
 
 @dataclass
 class ElevenLabsConfig:
@@ -83,8 +86,7 @@ class ElevenLabsRealtimeClient:
         self._connected: bool = False
         self._last_chunk_had_audio: bool = False
         
-        # 连接健康检查
-        self._last_audio_time: float = 0.0
+        # 并发重连保护
         self._reconnect_lock = asyncio.Lock()
         
 
@@ -196,12 +198,12 @@ class ElevenLabsRealtimeClient:
                 ssl=ssl_context  # ← 添加 SSL 上下文
             )
         except Exception as exc:
+            log.error("Failed to connect to ElevenLabs: %s", exc)
             self._connected = False
             self._ws = None
             raise
 
         self._connected = True
-        self._last_audio_time = asyncio.get_event_loop().time()
         
 
         # Start background receive loop
@@ -233,14 +235,12 @@ class ElevenLabsRealtimeClient:
                         await self.close()  # 先清理旧连接
                         await self.connect()  # 重新连接
                     except Exception as e:
-                        return  # 跳过这个音频块
+                        log.warning("Reconnect failed, dropping audio chunk: %s", e)
+                        return
         
         # 再次检查连接（重连可能失败）
         if not self._connected or self._ws is None:
             return
-
-        # 🔧 新增：更新最后发送时间
-        self._last_audio_time = asyncio.get_event_loop().time()
 
         b64_audio = base64.b64encode(audio_bytes).decode("ascii")
 
@@ -258,8 +258,9 @@ class ElevenLabsRealtimeClient:
             await self._ws.send(json.dumps(payload))
             self._last_chunk_had_audio = True
         except websockets.exceptions.ConnectionClosed as exc:
+            log.warning("Connection closed while sending audio: %s", exc)
             self._connected = False
-        except Exception as exc:
+        except Exception:
             raise
 
     async def send_commit(self) -> None:
@@ -295,6 +296,7 @@ class ElevenLabsRealtimeClient:
             await self._ws.send(json.dumps(payload))
             self._last_chunk_had_audio = False
         except Exception as exc:
+            log.error("Failed to send commit: %s", exc)
             raise
 
     async def _receive_loop(self) -> None:
@@ -316,13 +318,17 @@ class ElevenLabsRealtimeClient:
             async for raw in self._ws:
                 try:
                     msg = json.loads(raw)
-                except Exception as exc:
+                except Exception:
+                    log.debug("Ignoring non-JSON frame from ElevenLabs")
                     continue
 
                 msg_type = msg.get("message_type") or msg.get("type")
 
                 if msg_type in ("session_started", "sessionStarted"):
-                    session_id = msg.get("session_id", "unknown")
+                    log.info(
+                        "ElevenLabs session started: %s (model=%s)",
+                        msg.get("session_id", "unknown"), self.config.model_id,
+                    )
 
                 elif msg_type in ("partial_transcript", "partialTranscript"):
                     text = msg.get("transcript") or msg.get("text") or ""
@@ -339,16 +345,22 @@ class ElevenLabsRealtimeClient:
                         self.on_final(text)
 
                 elif msg_type and "error" in msg_type.lower():
-                    error_msg = msg.get("message", msg.get("error", str(msg)))
+                    # 服务端的报错此前被直接丢弃，排查时完全看不到
+                    log.error(
+                        "ElevenLabs error: %s",
+                        msg.get("message", msg.get("error", str(msg))),
+                    )
 
                 else:
-                    pass  # Unknown message type
+                    log.debug("Unknown message type from ElevenLabs: %s", msg_type)
 
         except asyncio.CancelledError:
             raise
         except websockets.exceptions.ConnectionClosed as exc:
+            log.info("ElevenLabs connection closed: %s", exc)
             self._connected = False
         except Exception as exc:
+            log.error("ElevenLabs receive loop failed: %s", exc, exc_info=True)
             self._connected = False
         
     def is_alive(self) -> bool:
@@ -382,8 +394,8 @@ class ElevenLabsRealtimeClient:
         if self._ws is not None:
             try:
                 await self._ws.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Error while closing ElevenLabs socket: %s", exc)
             finally:
                 self._ws = None
                 

@@ -27,20 +27,4 @@ final class SearchService {
         try await api.post("api/search/reindex-all", body: EmptyBody())
     }
 
-    func search(projectId: Int, query: String, topK: Int, mode: String = "hybrid") async throws -> SearchResponse {
-        try await api.get(
-            "api/search/projects/\(projectId)",
-            queryItems: [
-                URLQueryItem(name: "query", value: query),
-                URLQueryItem(name: "top_k", value: String(topK)),
-                URLQueryItem(name: "mode", value: mode),
-            ]
-        )
-    }
-
-    /// 清空并重建项目索引。换 embedding 模型后，旧向量与新查询不在同一空间，
-    /// 必须重建一次才能搜到历史摘要。
-    func reindex(projectId: Int) async throws -> ReindexResponse {
-        try await api.post("api/search/projects/\(projectId)/reindex", body: EmptyBody())
-    }
 }

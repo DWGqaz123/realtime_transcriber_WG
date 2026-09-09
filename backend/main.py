@@ -53,7 +53,7 @@ load_dotenv()
 
 # ==================== 导入配置和服务 ====================
 
-from config import LogConfig, SummaryConfig, EmbeddingConfig, ELEVENLABS_API_KEY
+from config import SummaryConfig, EmbeddingConfig, ELEVENLABS_API_KEY
 from session_manager import SessionManager
 from routes import projects, search
 
@@ -62,7 +62,7 @@ from routes import projects, search
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期事件"""
-    global run_logger, session_manager
+    global session_manager
     
     log.info("Realtime Transcriber API starting...")
     
@@ -75,15 +75,6 @@ async def lifespan(app: FastAPI):
     
     if session_manager is None:
         log.critical("session_manager is None — WebSocket connections will fail")
-    
-    # 设置日志模式
-    log_mode = os.getenv("LOG_MODE", "quiet").lower()
-    if log_mode in ("verbose", "debug"):
-        LogConfig.enable_verbose()
-    else:
-        LogConfig.enable_quiet()
-    
-    LogConfig.print_config()
     
     SummaryConfig.print_config()
 

@@ -2,7 +2,7 @@
 
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, Session as DBSession
-from database.models import Base, Project, Session, Summary, Embedding
+from database.models import Base, Project, Session, Summary
 from typing import Optional, List
 from datetime import datetime
 from pathlib import Path
@@ -446,20 +446,6 @@ class DatabaseManager:
                 db.query(Summary)
                 .filter(Summary.session_id == session_id)
                 .order_by(Summary.created_at.asc())
-                .all()
-            )
-        finally:
-            db.close()
-
-    @staticmethod
-    def get_project_summaries(project_id: int) -> List[Summary]:
-        db = DatabaseManager.get_db()
-        try:
-            return (
-                db.query(Summary)
-                .join(Session)
-                .filter(Session.project_id == project_id)
-                .order_by(Summary.created_at.desc())
                 .all()
             )
         finally:

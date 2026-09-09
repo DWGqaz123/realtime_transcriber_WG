@@ -1,7 +1,7 @@
 import time
 import logging
 from datetime import datetime
-from typing import Any, Callable, Awaitable, List
+from typing import Any, Callable, Awaitable
 
 from config import SummaryConfig
 from database.db import DatabaseManager

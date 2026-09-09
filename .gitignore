@@ -135,5 +135,11 @@ config.plist
 frontend_mac/**/backend*
 
 dist/
-database/
 build/
+
+# 注意：这里不要写裸的 database/。仓库里的 backend/database/ 是源码目录
+# （db.py / models.py），那条规则会把新增源码静默忽略掉——backend.spec
+# 就是被同类规则（backend/*.spec）吃掉过一次，导致打包链路断了几个月。
+# 真正的数据库文件在 ~/Library/Application Support/RealtimeTranscriber/，
+# 根本不在仓库里。下面这条只作为防御，万一有人往源码目录写 db 文件。
+backend/database/*.db

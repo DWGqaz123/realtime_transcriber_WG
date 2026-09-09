@@ -215,18 +215,11 @@ class ProjectListViewModel: ObservableObject {
     /// Delete a session
     func deleteSession(projectId: Int, sessionId: Int) async {
         do {
-            
-            // 先检查 session 是否在缓存中
-            if let sessions = projectSessions[projectId] {
-                let exists = sessions.contains { $0.id == sessionId }
-            }
-            
             try await projectService.deleteSession(projectId: projectId, sessionId: sessionId)
             
             
             // 从缓存中移除
             if var sessions = projectSessions[projectId] {
-                let beforeCount = sessions.count
                 sessions.removeAll { $0.id == sessionId }
                 projectSessions[projectId] = sessions
             }
@@ -237,7 +230,7 @@ class ProjectListViewModel: ObservableObject {
             }
             
             // 刷新项目信息（更新 session 计数）
-            if let project = projects.first(where: { $0.id == projectId }) {
+            if projects.contains(where: { $0.id == projectId }) {
                 let updated = try await projectService.getProject(id: projectId)
                 if let index = projects.firstIndex(where: { $0.id == projectId }) {
                     projects[index] = updated
@@ -338,17 +331,13 @@ class ProjectListViewModel: ObservableObject {
         // 1. 确保项目已选中
         if selectedProject?.id != projectId {
             if let project = projects.first(where: { $0.id == projectId }) {
-                await MainActor.run {  // ✅ 已经有 await
-                    selectProject(project)
-                }
+                selectProject(project)
             }
         }
         
         // 2. 确保项目已展开
         if !expandedProjects.contains(projectId) {
-            await MainActor.run {  // ✅ 已经有 await
-                expandedProjects.insert(projectId)
-            }
+            expandedProjects.insert(projectId)
         }
         
         // 3. 加载 sessions（如果还没加载）

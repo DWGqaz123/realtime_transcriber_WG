@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from fastapi import WebSocket
 
-from config import TranscriptionConfig, LogConfig, OPENAI_API_KEY
+from config import TranscriptionConfig, OPENAI_API_KEY
 from database.db import DatabaseManager
 from elevenlabs_client import ElevenLabsRealtimeClient, ElevenLabsConfig
 from indexing_service import get_indexing_service
@@ -598,8 +598,7 @@ class SessionManager:
             session.ingestion_buffer.append(stripped)
 
             if self.summary_handler.try_begin(session):
-                if LogConfig.LOG_SUMMARY:
-                    log.info("Summary trigger met, initiating generation")
+                log.info("Summary trigger met, initiating generation")
                 try:
                     await self._send_session_event(session, "summary_started", {"is_final": False})
                 except Exception:

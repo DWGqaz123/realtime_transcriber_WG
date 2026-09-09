@@ -75,26 +75,6 @@ class SearchViewModel: ObservableObject {
 
     private let searchService = SearchService()
 
-    /// 重建项目向量索引，然后重跑当前查询
-    func reindex(projectId: Int) async {
-        isReindexing = true
-        errorMessage = nil
-        statusMessage = "Rebuilding index..."
-
-        do {
-            let response = try await searchService.reindex(projectId: projectId)
-            statusMessage = "Indexed \(response.indexed) summaries"
-            isReindexing = false
-            if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                await search(in: projectId)
-            }
-        } catch {
-            statusMessage = nil
-            errorMessage = "Reindex failed: \(error.localizedDescription)"
-            isReindexing = false
-        }
-    }
-    
     func search(topK: Int = 10) async {
         guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
             errorMessage = "Please enter a search query"
@@ -142,35 +122,6 @@ class SearchViewModel: ObservableObject {
         }
     }
 
-    func search(in projectId: Int, topK: Int = 10) async {
-        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
-            errorMessage = "Please enter a search query"
-            return
-        }
-        
-        isSearching = true
-        errorMessage = nil
-        hasSearched = true
-        results = []
-        
-        
-        do {
-            let searchResponse = try await searchService.search(
-                projectId: projectId,
-                query: searchQuery.trimmingCharacters(in: .whitespaces),
-                topK: topK,
-                mode: mode.rawValue
-            )
-            self.results = searchResponse.results
-            self.lastSemanticHits = searchResponse.semantic_hits ?? 0
-            self.lastKeywordHits = searchResponse.keyword_hits ?? 0
-        } catch {
-            errorMessage = "Search failed: \(error.localizedDescription)"
-        }
-        
-        isSearching = false
-    }
-    
     func clearSearch() {
         searchQuery = ""
         results = []

@@ -27,18 +27,16 @@ struct ProjectSidebarView: View {
                 
                 Spacer()
                 
-                // 🔧 搜索按钮（仅在选中项目时显示）
-                if let project = viewModel.selectedProject {
-                    Button(action: {
-                        showSearchSheet = true
-                    }) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.indigo)
-                            .font(.title3)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Search in project")
+                // 搜索按钮：检索是跨项目的，不需要先选中项目
+                Button(action: {
+                    showSearchSheet = true
+                }) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.indigo)
+                        .font(.title3)
                 }
+                .buttonStyle(.plain)
+                .help("Search all projects")
                 
                 // 🔧 创建项目按钮（始终显示）
                 Button(action: {

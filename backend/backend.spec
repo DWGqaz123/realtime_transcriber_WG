@@ -44,8 +44,6 @@ hiddenimports = [
     "embedding_service",
     "faiss_manager",
     "indexing_service",
-    "logger",
-    "run_logger",
     "database.db",
     "database.models",
     "routes.projects",
