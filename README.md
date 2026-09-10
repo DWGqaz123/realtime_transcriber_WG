@@ -4,6 +4,12 @@
 
 **[Download Latest Release](https://github.com/DWGqaz123/realtime_transcriber_WG/releases/latest)**
 
+![Recording a session](docs/images/recording-session.png)
+*Live subtitles and confirmed transcript on the left, AI notes accumulating on the right — while the recording is still running.*
+
+![Reviewing summaries](docs/images/session-summaries.png)
+*Every session keeps its full transcript alongside the summaries it produced, including the final one generated on stop.*
+
 ---
 
 ## What it does

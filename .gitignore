@@ -143,3 +143,6 @@ build/
 # 真正的数据库文件在 ~/Library/Application Support/RealtimeTranscriber/，
 # 根本不在仓库里。下面这条只作为防御，万一有人往源码目录写 db 文件。
 backend/database/*.db
+
+# 演示讲稿，个人用
+video_script.md
