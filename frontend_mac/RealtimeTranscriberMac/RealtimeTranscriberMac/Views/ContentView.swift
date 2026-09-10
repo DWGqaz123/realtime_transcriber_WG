@@ -12,46 +12,50 @@ struct ContentView: View {
     @StateObject private var viewModel = TranscribeViewModel()
     @StateObject private var projectViewModel = ProjectListViewModel()
     @State private var showSaveSheet = false
+    @AppStorage("sidebar_visible") private var sidebarVisible = true
 
     var body: some View {
-        NavigationSplitView {
-            ProjectSidebarView(
-                viewModel: projectViewModel,
-                onNewSession: { project in
-                    projectViewModel.selectProject(project)
-                    viewModel.currentProjectId = project.id
-                    if viewModel.fullTranscript.isEmpty {
-                        viewModel.startNewSession()
-                    } else {
-                        showSaveSheet = true
-                    }
-                }
-            )
-        } detail: {
-            // 使用 HSplitView 实现双列布局
-            HSplitView {
-                // 左侧：录音和转录区域
-                RecordingView(
-                    viewModel: viewModel,
-                    projectViewModel: projectViewModel,
-                    onRequestNewSession: { showSaveSheet = true }
-                )
-                .frame(minWidth: 400, idealWidth: 600)
-                .task(id: projectViewModel.selectedProject?.id) {
-                    if let project = projectViewModel.selectedProject {
+        // 纯三栏 HSplitView。原先用 NavigationSplitView，但它在 macOS 上对
+        // sidebar 有自己的最小宽度约束，navigationSplitViewColumnWidth 压不下去，
+        // 窗口因此缩不小。设计稿本就是固定三栏，自己控制更直接——代价是没有
+        // 系统自带的侧栏折叠。
+        HSplitView {
+            if sidebarVisible {
+                ProjectSidebarView(
+                    viewModel: projectViewModel,
+                    onNewSession: { project in
+                        projectViewModel.selectProject(project)
                         viewModel.currentProjectId = project.id
+                        if viewModel.fullTranscript.isEmpty {
+                            viewModel.startNewSession()
+                        } else {
+                            showSaveSheet = true
+                        }
                     }
-                }
-                .onAppear {
-                    viewModel.currentProjectId = projectViewModel.selectedProject?.id
-                }
-                
-                // 右侧：智能笔记流
-                SummaryPanelView(viewModel: viewModel)
-                    .frame(minWidth: 300, idealWidth: 350, maxWidth: 450)
+                )
+                .frame(minWidth: 170, idealWidth: 252, maxWidth: 340)
+                .transition(.move(edge: .leading).combined(with: .opacity))
             }
+
+            RecordingView(
+                viewModel: viewModel,
+                projectViewModel: projectViewModel,
+                sidebarVisible: $sidebarVisible,
+                onRequestNewSession: { showSaveSheet = true }
+            )
+            .frame(minWidth: 300, idealWidth: 600)
+            .task(id: projectViewModel.selectedProject?.id) {
+                if let project = projectViewModel.selectedProject {
+                    viewModel.currentProjectId = project.id
+                }
+            }
+            .onAppear {
+                viewModel.currentProjectId = projectViewModel.selectedProject?.id
+            }
+
+            SummaryPanelView(viewModel: viewModel)
+                .frame(minWidth: 200, idealWidth: 286, maxWidth: 460)
         }
-        .navigationSplitViewStyle(.balanced)
         .sheet(isPresented: $showSaveSheet) {
             SaveSessionSheet(isPresented: $showSaveSheet) { name, notes in
                 Task {
@@ -77,6 +81,7 @@ struct ContentView: View {
 struct RecordingView: View {
     @ObservedObject var viewModel: TranscribeViewModel
     @ObservedObject var projectViewModel: ProjectListViewModel
+    @Binding var sidebarVisible: Bool
     var onRequestNewSession: () -> Void = {}
 
     var body: some View {
@@ -101,7 +106,23 @@ struct RecordingView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: Theme.Spacing.md) {
+            // HSplitView 没有系统自带的侧栏折叠，这里自己提供入口，
+            // 快捷键沿用 macOS 惯例 ⌘⌃S
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { sidebarVisible.toggle() }
+            } label: {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(sidebarVisible ? Theme.textMuted : Theme.accent)
+                    .frame(width: 26, height: 26)
+                    .background(sidebarVisible ? Theme.surface : Theme.accentBg)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.row))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("s", modifiers: [.command, .control])
+            .help(sidebarVisible ? "Hide sidebar (⌘⌃S)" : "Show sidebar (⌘⌃S)")
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(viewModel.isRecording ? "Recording session"
                      : (viewModel.canResume ? "Paused session" : "New session"))
@@ -111,6 +132,8 @@ struct RecordingView: View {
                 Text(projectViewModel.selectedProject?.name ?? "No project selected")
                     .font(.system(size: Theme.FontSize.small))
                     .foregroundColor(projectViewModel.selectedProject == nil ? Theme.warning : Theme.textFaint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
 
             Spacer()
@@ -149,49 +172,41 @@ struct RecordingView: View {
 
     // MARK: - 录音状态区
 
+    /// 录音状态区。窄窗口下电平表和"New Session"按钮会依次让位——
+    /// 一整行不可压缩的元素会把主区的最小宽度顶到 470pt 以上，
+    /// 窗口就再也缩不下来了。
     private var statusDock: some View {
+        ViewThatFits(in: .horizontal) {
+            dockRow(showMeter: true, showNewSession: true)
+            dockRow(showMeter: false, showNewSession: true)
+            dockRow(showMeter: false, showNewSession: false)
+        }
+        .padding(Theme.Spacing.lg)
+        .background(Theme.panelBg)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.card)
+                .stroke(Theme.border, lineWidth: 1)
+        )
+    }
+
+    private func dockRow(showMeter: Bool, showNewSession: Bool) -> some View {
         HStack(spacing: Theme.Spacing.lg) {
             primaryButton
+            statusInfo
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: Theme.Spacing.sm) {
-                    if viewModel.isRecording {
-                        Circle()
-                            .fill(Theme.danger)
-                            .frame(width: 7, height: 7)
-                            .opacity(viewModel.isDetectingSound ? 1 : 0.35)
-                            .animation(.easeInOut(duration: 0.25), value: viewModel.isDetectingSound)
-                        Text("Recording")
-                            .font(.system(size: Theme.FontSize.body, weight: .semibold))
-                            .foregroundColor(Theme.danger)
-                    } else if viewModel.canResume {
-                        Circle().fill(Theme.warning).frame(width: 7, height: 7)
-                        Text("Paused · saved")
-                            .font(.system(size: Theme.FontSize.body, weight: .semibold))
-                            .foregroundColor(Theme.warning)
-                    } else {
-                        Circle().fill(Theme.textFaint).frame(width: 7, height: 7)
-                        Text(projectViewModel.selectedProject == nil ? "Select a project to begin" : "Ready to record")
-                            .font(.system(size: Theme.FontSize.body))
-                            .foregroundColor(Theme.textMuted)
-                    }
-                }
-
-                Text(viewModel.formattedDuration)
-                    .font(.system(size: Theme.FontSize.large, weight: .medium, design: .monospaced))
-                    .foregroundColor(viewModel.isRecording ? Theme.textPrimary : Theme.textFaint)
+            if showMeter {
+                audioLevelGroup
             }
-            .frame(width: 150, alignment: .leading)
 
-            audioLevelGroup
+            Spacer(minLength: Theme.Spacing.sm)
 
-            Spacer()
-
-            if viewModel.canResume {
+            if showNewSession, viewModel.canResume {
                 Button(action: onRequestNewSession) {
                     Text("New Session")
                         .font(.system(size: Theme.FontSize.body, weight: .medium))
                         .foregroundColor(Theme.textSecondary)
+                        .lineLimit(1)
                         .padding(.horizontal, 12)
                         .frame(height: 30)
                         .background(Theme.surface)
@@ -201,13 +216,40 @@ struct RecordingView: View {
                 .help("Finish this session and start a new one")
             }
         }
-        .padding(Theme.Spacing.lg)
-        .background(Theme.panelBg)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.card)
-                .stroke(Theme.border, lineWidth: 1)
-        )
+    }
+
+    private var statusInfo: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: Theme.Spacing.sm) {
+                if viewModel.isRecording {
+                    Circle()
+                        .fill(Theme.danger)
+                        .frame(width: 7, height: 7)
+                        .opacity(viewModel.isDetectingSound ? 1 : 0.35)
+                        .animation(.easeInOut(duration: 0.25), value: viewModel.isDetectingSound)
+                    Text("Recording")
+                        .font(.system(size: Theme.FontSize.body, weight: .semibold))
+                        .foregroundColor(Theme.danger)
+                } else if viewModel.canResume {
+                    Circle().fill(Theme.warning).frame(width: 7, height: 7)
+                    Text("Paused")
+                        .font(.system(size: Theme.FontSize.body, weight: .semibold))
+                        .foregroundColor(Theme.warning)
+                } else {
+                    Circle().fill(Theme.textFaint).frame(width: 7, height: 7)
+                    Text(projectViewModel.selectedProject == nil ? "Select a project" : "Ready")
+                        .font(.system(size: Theme.FontSize.body))
+                        .foregroundColor(Theme.textMuted)
+                }
+            }
+            .lineLimit(1)
+
+            Text(viewModel.formattedDuration)
+                .font(.system(size: Theme.FontSize.large, weight: .medium, design: .monospaced))
+                .foregroundColor(viewModel.isRecording ? Theme.textPrimary : Theme.textFaint)
+                .lineLimit(1)
+        }
+        .lineLimit(1)
     }
 
     private var primaryButton: some View {
@@ -287,6 +329,8 @@ struct RecordingView: View {
                  : viewModel.currentSubtitle)
                 .font(.system(size: Theme.FontSize.medium))
                 .foregroundColor(viewModel.currentSubtitle.isEmpty ? Theme.textFaint : Theme.textPrimary)
+                // 没有这行，长句子会按固有宽度铺开，把整个窗口顶宽
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Spacing.lg)
                 .background(Theme.surface)
@@ -331,6 +375,7 @@ struct RecordingView: View {
                             .font(.system(size: Theme.FontSize.medium))
                             .foregroundColor(Theme.textSecondary)
                             .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }

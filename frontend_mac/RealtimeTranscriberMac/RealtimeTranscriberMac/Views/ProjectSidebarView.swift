@@ -143,8 +143,7 @@ struct ProjectSidebarView: View {
         }
         .padding(.horizontal, Theme.Spacing.lg)
         .padding(.vertical, Theme.Spacing.xl)
-        .frame(minWidth: 236, idealWidth: 252, maxWidth: 320)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Theme.panelBg)
         .sheet(isPresented: $showCreateSheet) {
             CreateProjectSheet { name, description in

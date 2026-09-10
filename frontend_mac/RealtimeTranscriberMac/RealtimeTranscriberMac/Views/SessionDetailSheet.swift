@@ -162,6 +162,7 @@ struct SessionDetailSheet: View {
                         .foregroundColor(Theme.textSecondary)
                         .textSelection(.enabled)
                         .lineSpacing(4)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(Theme.Spacing.lg)
                         .background(Theme.surface)
