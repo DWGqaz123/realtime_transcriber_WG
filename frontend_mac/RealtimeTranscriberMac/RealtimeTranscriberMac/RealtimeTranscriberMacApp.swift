@@ -27,6 +27,9 @@ struct RealtimeTranscriberMacApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(backendManager)
+                // 设计稿是为深色环境画的，用固定深色配色；跟随系统会在浅色
+                // 模式下让分隔条、sheet 背景等系统绘制的部分透出浅色。
+                .preferredColorScheme(.dark)
                 .onAppear {
                     appDelegate.backendManager = backendManager
                     // 🔧 设置通知监听器
@@ -35,6 +38,9 @@ struct RealtimeTranscriberMacApp: App {
 
                 }
         }
+        // 设计稿尺寸。defaultSize 只决定首次打开的大小，不会限制拖拽——
+        // 不要用 windowResizability(.contentSize)，那会把窗口锁死在内容尺寸上。
+        .defaultSize(width: 1220, height: 760)
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Realtime Transcriber") {
@@ -60,6 +66,7 @@ struct RealtimeTranscriberMacApp: App {
         // 添加设置窗口
         Settings {
             SettingsView()
+                .preferredColorScheme(.dark)
         }
     }
     

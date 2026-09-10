@@ -56,7 +56,6 @@ final class TranscribeViewModel: ObservableObject {
     
     // 录音状态
     @Published var isRecording: Bool = false
-    @Published var permissionStatus: String = "Unknown"
     @Published var showPermissionAlert: Bool = false
     
     // 转录内容
@@ -79,7 +78,6 @@ final class TranscribeViewModel: ObservableObject {
     @Published var isGeneratingSummary: Bool = false
     @Published var nextSummaryCountdown: Int = 0  // 倒计时秒数
     @Published var lastSummaryTimestamp: Date? = nil
-    @Published var summaryGenerationProgress: String = ""  // 进度文本
 
     // 🔧 新增：计时器
     private var summaryCountdownTimer: Timer?
@@ -190,10 +188,7 @@ final class TranscribeViewModel: ObservableObject {
         audioCapture.requestPermission { [weak self] granted in
             guard let self = self else { return }
             Task { @MainActor in
-                if granted {
-                    self.permissionStatus = "Granted ✅"
-                } else {
-                    self.permissionStatus = "Denied ❌"
+                if !granted {
                     self.showPermissionAlert = true
                 }
             }
@@ -211,7 +206,6 @@ final class TranscribeViewModel: ObservableObject {
                 await self.loadSummaryTimingConfig()
                 // 检查权限
                 if !granted {
-                    self.permissionStatus = "Denied - Check System Settings ❌"
                     self.showPermissionAlert = true
                     return
                 }
@@ -227,7 +221,6 @@ final class TranscribeViewModel: ObservableObject {
                 // 🔧 检查项目 ID
                 guard let projectId = self.currentProjectId else {
                     self.currentSubtitle = "Please select a project first"
-                    self.permissionStatus = "No project selected ⚠️"
                     return
                 }
                 
@@ -243,7 +236,6 @@ final class TranscribeViewModel: ObservableObject {
                 }
                 
                 
-                self.permissionStatus = "Recording... 🎤"
                 self.recordingDuration = 0.0
                 self.audioLevel = 0.0
                 self.isDetectingSound = false
@@ -296,7 +288,6 @@ final class TranscribeViewModel: ObservableObject {
         
         isRecording = false
         currentSubtitle = ""  // 清空字幕
-        permissionStatus = "Paused - saved, press Resume to continue 💾"
         
         // 停止倒计时
         stopSummaryCountdown()
@@ -326,9 +317,7 @@ final class TranscribeViewModel: ObservableObject {
         fullTranscript = ""
         currentSubtitle = ""
         summaries.removeAll()
-        summaryGenerationProgress = ""
         savedSessionId = nil
-        permissionStatus = "Ready to record 🎤"
         client.disconnect()
         onSaveComplete?()
     }
@@ -370,11 +359,6 @@ final class TranscribeViewModel: ObservableObject {
             fullTranscript += content
         case "summary_started":
             isGeneratingSummary = true
-            if event.payload.is_final == true {
-                summaryGenerationProgress = "🏁 Generating final summary of entire recording..."
-            } else {
-                summaryGenerationProgress = "🤖 Generating summary..."
-            }
         case "summary":
             handleSummaryEvent(from: data)
         case "save_complete":
@@ -495,14 +479,6 @@ final class TranscribeViewModel: ObservableObject {
         
         nextSummaryCountdown = remaining
         
-        // 更新进度文本
-        if isGeneratingSummary {
-            summaryGenerationProgress = "🤖 Generating summary..."
-        } else if remaining > 0 {
-            summaryGenerationProgress = "⏳ Next summary in: \(remaining)s"
-        } else {
-            summaryGenerationProgress = "⏳ Waiting for complete sentence..."
-        }
     }
 
     /// 停止倒计时
@@ -510,7 +486,6 @@ final class TranscribeViewModel: ObservableObject {
         summaryCountdownTimer?.invalidate()
         summaryCountdownTimer = nil
         nextSummaryCountdown = 0
-        summaryGenerationProgress = ""
     }
 
     /// 重置倒计时（摘要生成后）

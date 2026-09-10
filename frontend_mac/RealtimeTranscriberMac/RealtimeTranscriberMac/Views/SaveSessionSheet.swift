@@ -13,29 +13,35 @@ struct SaveSessionSheet: View {
     @State private var notes: String = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Name This Session")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Name")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                TextField("e.g. Week 3 Lecture", text: $name)
-                    .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Name this session")
+                    .font(.system(size: Theme.FontSize.title, weight: .semibold))
+                    .foregroundColor(Theme.textPrimary)
+                Text("The recording is already saved — this only adds a label.")
+                    .font(.system(size: Theme.FontSize.micro))
+                    .foregroundColor(Theme.textFaint)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Notes (optional)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Text("NAME").sectionCaption()
+                TextField("e.g. Week 3 Lecture", text: $name)
+                    .textFieldStyle(ThemedTextFieldStyle())
+            }
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Text("NOTES (OPTIONAL)").sectionCaption()
                 TextEditor(text: $notes)
+                    .font(.system(size: Theme.FontSize.medium))
+                    .foregroundColor(Theme.textPrimary)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
                     .frame(height: 80)
-                    .font(.body)
+                    .background(Theme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.row))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: Theme.Radius.row)
+                            .stroke(Theme.border, lineWidth: 1)
                     )
             }
 
@@ -44,8 +50,8 @@ struct SaveSessionSheet: View {
                     isPresented = false
                     onConfirm("", "")
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(.secondary)
+                .buttonStyle(ThemedSecondaryButtonStyle())
+                .keyboardShortcut(.escape)
 
                 Spacer()
 
@@ -53,11 +59,11 @@ struct SaveSessionSheet: View {
                     isPresented = false
                     onConfirm(name, notes)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.indigo)
+                .buttonStyle(ThemedPrimaryButtonStyle())
+                .keyboardShortcut(.return)
             }
         }
-        .padding(24)
-        .frame(width: 380)
+        .padding(Theme.Spacing.xl + 6)
+        .themedSheet(width: 400)
     }
 }

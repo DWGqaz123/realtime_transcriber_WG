@@ -42,157 +42,131 @@ struct SettingsView: View {
     
     var body: some View {
         ScrollView {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Settings")
-                .font(.largeTitle)
-                .fontWeight(.bold)
+            VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                Text("Settings")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(Theme.textPrimary)
 
-            Divider()
-            
-            // OpenAI API Key
-            VStack(alignment: .leading, spacing: 8) {
-                Text("OpenAI API Key")
-                    .font(.headline)
-                
-                SecureField("sk-proj-...", text: $openaiKey)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 500)
-                
-                Text("Used for generating summaries and for semantic search embeddings")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            // ElevenLabs API Key
-            VStack(alignment: .leading, spacing: 8) {
-                Text("ElevenLabs API Key")
-                    .font(.headline)
-                
-                SecureField("sk_...", text: $elevenlabsKey)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 480)
-                
-                Text("Used for real-time speech transcription")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+                field("OPENAI API KEY",
+                      hint: "Used for summaries and for search embeddings.") {
+                    SecureField("sk-proj-…", text: $openaiKey)
+                        .textFieldStyle(ThemedTextFieldStyle())
+                        .frame(maxWidth: 460)
+                }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Backend Host")
-                    .font(.headline)
+                field("ELEVENLABS API KEY",
+                      hint: "Used for real-time speech transcription.") {
+                    SecureField("sk_…", text: $elevenlabsKey)
+                        .textFieldStyle(ThemedTextFieldStyle())
+                        .frame(maxWidth: 460)
+                }
 
-                TextField("127.0.0.1", text: $backendHost)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260)
-
-                Text("Local backend address used by the app.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Backend Port")
-                    .font(.headline)
-
-                TextField("9123", text: $backendPort)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 180)
-
-                Text("Change this if the default port is already occupied.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Transcription & Summary Language")
-                    .font(.headline)
-
-                Picker("", selection: $transcriptionLanguage) {
-                    ForEach(languageOptions, id: \.code) { option in
-                        Text(option.label).tag(option.code)
+                HStack(alignment: .top, spacing: Theme.Spacing.lg) {
+                    field("BACKEND HOST", hint: "Local backend address.") {
+                        TextField("127.0.0.1", text: $backendHost)
+                            .textFieldStyle(ThemedTextFieldStyle())
+                            .frame(width: 200)
+                    }
+                    field("PORT", hint: "Change if the default is occupied.") {
+                        TextField("9123", text: $backendPort)
+                            .textFieldStyle(ThemedTextFieldStyle())
+                            .frame(width: 110)
                     }
                 }
-                .pickerStyle(.menu)
-                .frame(maxWidth: 260)
 
-                Text("Locks ElevenLabs speech recognition to the selected language. Summaries will also be generated in this language. Defaults to English.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Secondary Languages")
-                    .font(.headline)
-
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)],
-                    alignment: .leading,
-                    spacing: 2
-                ) {
-                    ForEach(languageOptions.filter { !$0.code.isEmpty && $0.code != transcriptionLanguage }, id: \.code) { option in
-                        Toggle(option.label, isOn: Binding(
-                            get: { secondaryLanguages.contains(option.code) },
-                            set: { isOn in
-                                if isOn { secondaryLanguages.insert(option.code) }
-                                else { secondaryLanguages.remove(option.code) }
-                            }
-                        ))
-                        .toggleStyle(.checkbox)
+                field("PRIMARY LANGUAGE",
+                      hint: "Locks speech recognition to this language. Summaries follow it too.") {
+                    Picker("", selection: $transcriptionLanguage) {
+                        ForEach(languageOptions, id: \.code) { option in
+                            Text(option.label).tag(option.code)
+                        }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 240)
                 }
-                .frame(maxWidth: 500, alignment: .leading)
 
-                Text("Extra languages allowed to appear in the audio — useful when you mix languages in one sentence. Leave all unchecked if you speak only the language above.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Auto Summary Interval")
-                    .font(.headline)
-
-                TextField("30", text: $summaryIntervalSeconds)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 180)
-
-                Text("Main auto-summary interval in seconds. Frontend countdown follows the backend value.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            // Save Button
-            HStack(spacing: 12) {
-                Button("Save & Restart Backend") {
-                    saveAPIKeys()
-                }
-                .buttonStyle(.borderedProminent)
-                
-                if showSaveSuccess {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("Saved! Backend restarting...")
-                            .foregroundColor(.green)
+                field("SECONDARY LANGUAGES",
+                      hint: "Extra languages allowed in the audio — for sentences that switch mid-way. Leave empty if you speak only the language above.") {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)],
+                        alignment: .leading,
+                        spacing: 2
+                    ) {
+                        ForEach(languageOptions.filter { !$0.code.isEmpty && $0.code != transcriptionLanguage }, id: \.code) { option in
+                            Toggle(option.label, isOn: Binding(
+                                get: { secondaryLanguages.contains(option.code) },
+                                set: { isOn in
+                                    if isOn { secondaryLanguages.insert(option.code) }
+                                    else { secondaryLanguages.remove(option.code) }
+                                }
+                            ))
+                            .toggleStyle(.checkbox)
+                            .font(.system(size: Theme.FontSize.body))
+                            .foregroundColor(Theme.textSecondary)
+                        }
                     }
-                    .transition(.opacity)
+                    .frame(maxWidth: 460, alignment: .leading)
+                }
+
+                field("AUTO SUMMARY INTERVAL",
+                      hint: "Seconds. A window still waits for the current sentence to finish, so the real gap is slightly longer.") {
+                    TextField("45", text: $summaryIntervalSeconds)
+                        .textFieldStyle(ThemedTextFieldStyle())
+                        .frame(width: 110)
+                }
+
+                Rectangle().fill(Theme.border).frame(height: 1)
+
+                HStack(spacing: Theme.Spacing.lg) {
+                    Button("Save & Restart Backend") { saveAPIKeys() }
+                        .buttonStyle(ThemedPrimaryButtonStyle())
+
+                    if showSaveSuccess {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 10))
+                            Text("Saved — backend restarting")
+                                .font(.system(size: Theme.FontSize.small))
+                        }
+                        .foregroundColor(Theme.success)
+                        .transition(.opacity)
+                    }
+
+                    Spacer()
+                }
+
+                if let validationMessage {
+                    Text(validationMessage)
+                        .font(.system(size: Theme.FontSize.small))
+                        .foregroundColor(Theme.danger)
                 }
             }
-
-            if let validationMessage {
-                Text(validationMessage)
-                    .font(.caption)
-                    .foregroundColor(.red)
-            }
-            
+            .padding(Theme.Spacing.xl + 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding()
-        .frame(minWidth: 600)
-        } // ScrollView
-        .frame(minWidth: 600, minHeight: 400)
+        .background(Theme.contentBg)
+        .frame(minWidth: 560, minHeight: 460)
     }
-    
-    // MARK: - Methods
-    
+
+    /// 统一的表单项：全大写标签 + 控件 + 灰色说明
+    @ViewBuilder
+    private func field<Content: View>(
+        _ title: String,
+        hint: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text(title).sectionCaption()
+            content()
+            Text(hint)
+                .font(.system(size: Theme.FontSize.micro))
+                .foregroundColor(Theme.textFaint)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 460, alignment: .leading)
+        }
+    }
+
     private func saveAPIKeys() {
         let trimmedHost = backendHost.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedHost.isEmpty else {

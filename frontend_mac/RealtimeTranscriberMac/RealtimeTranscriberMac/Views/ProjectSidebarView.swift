@@ -18,56 +18,95 @@ struct ProjectSidebarView: View {
     @State private var showSearchSheet = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Projects")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-                
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            // 品牌
+            HStack(spacing: Theme.Spacing.md) {
+                RoundedRectangle(cornerRadius: Theme.Radius.row)
+                    .fill(Theme.accentBg)
+                    .frame(width: 22, height: 22)
+                    .overlay(
+                        Image(systemName: "waveform")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(Theme.accent)
+                    )
+                Text("Transcriber")
+                    .font(.system(size: Theme.FontSize.medium, weight: .semibold))
+                    .foregroundColor(Theme.textPrimary)
                 Spacer()
-                
-                // 搜索按钮：检索是跨项目的，不需要先选中项目
-                Button(action: {
-                    showSearchSheet = true
-                }) {
+            }
+
+            // 检索是跨项目的，不需要先选中项目，所以放在项目树之上
+            Button {
+                showSearchSheet = true
+            } label: {
+                HStack(spacing: Theme.Spacing.md) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundColor(.indigo)
-                        .font(.title3)
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.textMuted)
+                    Text("Search all projects")
+                        .font(.system(size: Theme.FontSize.body))
+                        .foregroundColor(Theme.textMuted)
+                    Spacer()
                 }
-                .buttonStyle(.plain)
-                .help("Search all projects")
-                
-                // 🔧 创建项目按钮（始终显示）
-                Button(action: {
+                .padding(.horizontal, 11)
+                .frame(height: 38)
+                .frame(maxWidth: .infinity)
+                .background(Theme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.field))
+            }
+            .buttonStyle(.plain)
+
+            // 工具栏
+            HStack(spacing: Theme.Spacing.sm) {
+                Button {
                     showCreateSheet = true
-                }) {
-                    Image(systemName: "plus.circle.fill")
-                        .foregroundColor(.blue)
-                        .font(.title3)
+                } label: {
+                    HStack(spacing: Theme.Spacing.sm) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("New Project")
+                            .font(.system(size: Theme.FontSize.small, weight: .medium))
+                    }
+                    .foregroundColor(Theme.accent)
+                    .padding(.horizontal, 9)
+                    .frame(height: 26)
+                    .background(Theme.accentBg)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.row))
                 }
                 .buttonStyle(.plain)
                 .help("Create new project")
+
+                Button {
+                    Task { await viewModel.loadProjects() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10))
+                        .foregroundColor(Theme.textFaint)
+                        .frame(width: 26, height: 26)
+                        .background(Theme.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.row))
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isLoading)
+                .help("Refresh projects")
+
+                Spacer()
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            
-            Divider()
-            
+
             // Project List
             if viewModel.isLoading && viewModel.projects.isEmpty {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Loading projects...")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                VStack(spacing: Theme.Spacing.md) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading projects…")
+                        .font(.system(size: Theme.FontSize.small))
+                        .foregroundColor(Theme.textFaint)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.projects.isEmpty {
                 emptyStateView
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    LazyVStack(spacing: Theme.Spacing.sm) {
                         ForEach(viewModel.projects) { project in
                             ProjectRowExpandable(
                                 project: project,
@@ -98,13 +137,15 @@ struct ProjectSidebarView: View {
                     }
                 }
             }
-            
-            Divider()
-            
-            // Footer
+
+            Spacer(minLength: 0)
             footerView
         }
-        .frame(minWidth: 250, idealWidth: 300, maxWidth: 350)
+        .padding(.horizontal, Theme.Spacing.lg)
+        .padding(.vertical, Theme.Spacing.xl)
+        .frame(minWidth: 236, idealWidth: 252, maxWidth: 320)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Theme.panelBg)
         .sheet(isPresented: $showCreateSheet) {
             CreateProjectSheet { name, description in
                 await viewModel.createProject(
@@ -220,64 +261,28 @@ struct ProjectSidebarView: View {
     // MARK: - Empty State
     
     private var emptyStateView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "folder.badge.plus")
-                .font(.system(size: 48))
-                .foregroundColor(.gray.opacity(0.5))
-            
-            Text("No Projects Yet")
-                .font(.headline)
-                .foregroundColor(.secondary)
-            
-            Text("Create your first project to get started")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-            
-            Button(action: {
-                showCreateSheet = true
-            }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus.circle.fill")
-                    Text("New Project")
-                }
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        
+        EmptyState(icon: "folder.badge.plus",
+                   title: "No projects yet",
+                   hint: "Create one to start recording")
     }
-    
+
     // MARK: - Footer
     
     private var footerView: some View {
-        HStack {
+        HStack(spacing: Theme.Spacing.sm) {
             if viewModel.isLoading {
-                ProgressView()
-                    .controlSize(.small)
+                ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 10, height: 10)
             }
-            
-            Text("\(viewModel.projects.count) project\(viewModel.projects.count == 1 ? "" : "s")")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
+            Text("Settings")
+                .font(.system(size: Theme.FontSize.small))
+                .foregroundColor(Theme.textFaint)
             Spacer()
-            
-            Button(action: {
-                Task {
-                    await viewModel.loadProjects()
-                }
-            }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.caption)
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isLoading)
-            .help("Refresh projects")
+            Chip(text: "⌘,", background: Theme.surface, mono: true)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.top, Theme.Spacing.md)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+        }
     }
 }
 
@@ -299,100 +304,100 @@ struct ProjectRowExpandable: View {
     @State private var isHovering = false
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Project row
-            HStack(spacing: 8) {
-                // Expand/Collapse button
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            // 项目行
+            HStack(spacing: Theme.Spacing.sm) {
                 Button(action: onToggleExpand) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .frame(width: 16, height: 16)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(Theme.textFaint)
+                        .frame(width: 12, height: 12)
                 }
                 .buttonStyle(.plain)
-                .opacity(project.sessionCount > 0 ? 1 : 0.3)
+                .opacity(project.sessionCount > 0 ? 1 : 0.25)
                 .disabled(project.sessionCount == 0)
-                
-                // Icon
-                Image(systemName: isSelected ? "folder.fill" : "folder")
-                    .foregroundColor(isSelected ? .indigo : .secondary)
-                    .font(.title3)
-                
-                // Content
-                VStack(alignment: .leading, spacing: 2) {
+
+                VStack(alignment: .leading, spacing: 1) {
                     Text(project.name)
-                        .font(.body)
-                        .fontWeight(isSelected ? .semibold : .regular)
+                        .font(.system(size: Theme.FontSize.body, weight: isSelected ? .semibold : .medium))
+                        .foregroundColor(isSelected ? Theme.textPrimary : Theme.textSecondary)
                         .lineLimit(1)
-                    
+
                     Text("\(project.sessionCount) session\(project.sessionCount == 1 ? "" : "s")")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: Theme.FontSize.micro))
+                        .foregroundColor(Theme.textFaint)
                 }
-                
-                Spacer()
-                
-                // Hover action buttons
+
+                Spacer(minLength: 0)
+
                 if isHovering {
                     if let onNewSession {
                         Button(action: onNewSession) {
-                            Image(systemName: "plus.circle")
-                                .foregroundColor(.indigo)
-                                .font(.caption)
+                            Image(systemName: "plus")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(Theme.accent)
                         }
                         .buttonStyle(.plain)
                         .help("New session in this project")
                     }
                     Button(action: onDelete) {
                         Image(systemName: "trash")
-                            .foregroundColor(.red)
-                            .font(.caption)
+                            .font(.system(size: 9))
+                            .foregroundColor(Theme.danger)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete project")
+                }
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .onTapGesture { onSelectProject() }
+            .onHover { isHovering = $0 }
+
+            // 会话
+            if isExpanded {
+                if sessions.isEmpty {
+                    Text("No sessions yet")
+                        .font(.system(size: Theme.FontSize.micro))
+                        .foregroundColor(Theme.textFaint)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                } else {
+                    ForEach(sessions) { session in
+                        SessionRowView(
+                            session: session,
+                            isSelected: selectedSessionId == session.id,
+                            onSelect: { onSelectSession(session) },
+                            onDelete: { onDeleteSession(session) }
+                        )
+                    }
+                }
+
+                if let onNewSession {
+                    Button(action: onNewSession) {
+                        HStack(spacing: Theme.Spacing.sm) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 8, weight: .bold))
+                            Text("New session")
+                                .font(.system(size: Theme.FontSize.micro, weight: .medium))
+                            Spacer()
+                        }
+                        .foregroundColor(Theme.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isSelected ? Color.indigo.opacity(0.12) : Color.clear)
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onSelectProject()
-            }
-            .onHover { hovering in
-                isHovering = hovering
-            }
-            
-            // Sessions list (when expanded)
-            // Session rows (when expanded)
-            if isExpanded && !sessions.isEmpty {
-                ForEach(sessions) { session in
-                    SessionRowView(
-                        session: session,
-                        isSelected: selectedSessionId == session.id,
-                        onSelect: {
-                            onSelectSession(session)
-                        },
-                        onDelete: {  // 🔧 新增
-                            onDeleteSession(session)
-                        }
-                    )
-                    
-                    if sessions.isEmpty {
-                        Text("No sessions yet")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.vertical, 12)
-                            .padding(.leading, 52)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
         }
+        .padding(Theme.Spacing.xs)
+        .background(isExpanded || isSelected ? Theme.cardAlt : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
     }
 }
+
 
 // MARK: - Session Row
 
@@ -405,74 +410,47 @@ struct SessionRowView: View {
     @State private var isHovering = false
     
     var body: some View {
-        HStack(spacing: 8) {
-            // Mode icon
-            Image(systemName: session.mode == "lecture" ? "book.fill" : "bubble.left.and.bubble.right.fill")
-                .font(.caption)
-                .foregroundColor(isSelected ? .indigo : .secondary)
-                .frame(width: 16)
-            
+        HStack(spacing: Theme.Spacing.sm) {
             VStack(alignment: .leading, spacing: 2) {
-                if let name = session.name, !name.isEmpty {
-                    Text(name)
-                        .font(.caption)
-                        .fontWeight(isSelected ? .semibold : .regular)
-                        .lineLimit(1)
-                } else {
-                    Text(session.modeDisplayName)
-                        .font(.caption)
-                        .fontWeight(isSelected ? .semibold : .regular)
-                }
+                Text(session.name?.isEmpty == false ? session.name! : session.modeDisplayName)
+                    .font(.system(size: Theme.FontSize.small, weight: isSelected ? .semibold : .regular))
+                    .foregroundColor(isSelected ? Theme.textPrimary : Theme.textSecondary)
+                    .lineLimit(1)
 
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     Text(session.formattedStartDate)
-                        .font(.caption2)
-                    Text("•")
-                        .font(.caption2)
+                    Text("·")
                     Text(session.formattedDuration)
-                        .font(.caption2)
+                    Text("·")
+                    Text("\(session.sentenceCount) lines")
                 }
-                .foregroundColor(.secondary)
+                .font(.system(size: Theme.FontSize.micro))
+                .foregroundColor(Theme.textFaint)
+                .lineLimit(1)
             }
-            
-            Spacer()
+
+            Spacer(minLength: 0)
+
             if isHovering {
-                            Button(action: onDelete) {
-                                Image(systemName: "trash")
-                                    .foregroundColor(.red)
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Delete session")
-                        }
-            
-            // Sentence count
-            Text("\(session.sentenceCount)")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.gray.opacity(0.2))
-                )
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 9))
+                        .foregroundColor(Theme.danger)
+                }
+                .buttonStyle(.plain)
+                .help("Delete session")
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .padding(.leading, 36)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(isSelected ? Color.indigo.opacity(0.1) : (isHovering ? Color.gray.opacity(0.04) : Color.clear))
-        )
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(isSelected ? Theme.rowActive : (isHovering ? Theme.surface : Color.clear))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.row))
         .contentShape(Rectangle())
-        .onTapGesture {
-            onSelect()
-        }
-        .onHover { hovering in
-            isHovering = hovering
-        }
+        .onTapGesture { onSelect() }
+        .onHover { isHovering = $0 }
     }
 }
+
 
 #Preview {
     ProjectSidebarView(viewModel: ProjectListViewModel())

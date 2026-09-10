@@ -17,117 +17,81 @@ struct CreateProjectSheet: View {
     let onCreate: (String, String) async -> Void
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Create new project")
+                        .font(.system(size: Theme.FontSize.title, weight: .semibold))
+                        .foregroundColor(Theme.textPrimary)
+                    Text("Sessions and summaries are grouped under a project.")
+                        .font(.system(size: Theme.FontSize.micro))
+                        .foregroundColor(Theme.textFaint)
+                }
+
+                Spacer()
+
+                IconButton(icon: "xmark") { dismiss() }
+            }
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Text("PROJECT NAME").sectionCaption()
+                TextField("e.g., CMU Capstone Project", text: $projectName)
+                    .textFieldStyle(ThemedTextFieldStyle())
+                    .onSubmit(create)
+            }
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Text("DESCRIPTION (OPTIONAL)").sectionCaption()
+                TextEditor(text: $projectDescription)
+                    .font(.system(size: Theme.FontSize.medium))
+                    .foregroundColor(Theme.textPrimary)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .frame(height: 70)
+                    .background(Theme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.row))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.row)
+                            .stroke(Theme.border, lineWidth: 1)
+                    )
+            }
+
             HStack {
-                Text("Create New Project")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(ThemedSecondaryButtonStyle())
+                    .keyboardShortcut(.escape)
+
                 Spacer()
-                
-                Button(action: {
-                    dismiss()
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
-                        .font(.title3)
-                }
-                .buttonStyle(.plain)
-            }
-            
-            Divider()
-            
-            // Form
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Project Name")
-                        .font(.headline)
-                    
-                    TextField("e.g., CMU Capstone Project", text: $projectName)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit {
-                            if canCreate {
-                                createProject()
-                            }
-                        }
-                }
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Description (Optional)")
-                        .font(.headline)
-                    
-                    TextEditor(text: $projectDescription)
-                        .font(.body)
-                        .frame(height: 80)
-                        .padding(4)
-                        .background(Color.gray.opacity(0.04))
-                        .cornerRadius(10)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.gray.opacity(0.15), lineWidth: 1)
-                        )
-                }
-                
-                Text("You can organize your recordings by project. All transcripts and sessions will be associated with this project.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            // Buttons
-            HStack(spacing: 12) {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.escape)
-                
-                Spacer()
-                
-                Button(action: {
-                    createProject()
-                }) {
-                    HStack(spacing: 6) {
+
+                Button(action: create) {
+                    HStack(spacing: Theme.Spacing.sm) {
                         if isCreating {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                                .frame(width: 16, height: 16)
-                        } else {
-                            Image(systemName: "plus.circle.fill")
+                            ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 10, height: 10)
                         }
-                        Text("Create Project")
+                        Text(isCreating ? "Creating…" : "Create Project")
                     }
-                    .frame(minWidth: 140)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canCreate || isCreating)
+                .buttonStyle(ThemedPrimaryButtonStyle())
                 .keyboardShortcut(.return)
+                .disabled(projectName.trimmingCharacters(in: .whitespaces).isEmpty || isCreating)
             }
         }
-        .padding(24)
-        .frame(width: 500, height: 350)
+        .padding(Theme.Spacing.xl + 6)
+        .themedSheet(width: 430)
     }
-    
-    // MARK: - Computed Properties
-    
-    private var canCreate: Bool {
-        !projectName.trimmingCharacters(in: .whitespaces).isEmpty
-    }
-    
-    // MARK: - Actions
-    
-    private func createProject() {
-        guard canCreate else { return }
-        
+
+    private func create() {
+        let trimmed = projectName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !isCreating else { return }
         isCreating = true
-        
         Task {
-            await onCreate(projectName, projectDescription)
+            await onCreate(trimmed, projectDescription.trimmingCharacters(in: .whitespaces))
+            isCreating = false
             dismiss()
         }
     }
 }
+
 
 #Preview {
     CreateProjectSheet { name, description in

@@ -23,7 +23,6 @@ class ProjectListViewModel: ObservableObject {
     @Published var expandedProjects: Set<Int> = []  // 展开的项目ID
     @Published var selectedSession: RecordingSession?  // 选中的 session
     @Published var showSessionDetail: Bool = false  // 是否显示详情浮窗
-    @Published var sessionDetailLoading: Bool = false  // 加载详情中
     
     // MARK: - Private Properties
     
@@ -177,7 +176,6 @@ class ProjectListViewModel: ObservableObject {
 
     /// 加载 session 详情（包含完整转录）
     private func loadSessionDetail(projectId: Int, sessionId: Int) async {
-        sessionDetailLoading = true
         
         do {
             let detailSession = try await projectService.fetchSessionDetail(
@@ -203,7 +201,6 @@ class ProjectListViewModel: ObservableObject {
             showError = true
         }
         
-        sessionDetailLoading = false
     }
 
     /// 关闭 session 详情
